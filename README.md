@@ -1,4 +1,4 @@
-# AI Arbitration Python
+# AI Arbitration Platform with Python
 
 This repository contains the Python backend migration of the AI Arbitration Platform, transitioning from an n8n + Google Sheets architecture to a pure Python stack backed by PostgreSQL.
 
