@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -19,7 +19,15 @@ router = APIRouter(prefix="/transactions", tags=["Transactions"])
 templates = Jinja2Templates(directory="templates")
 
 @router.get("/verify", response_class=HTMLResponse)
-async def verify_deposit(request: Request, caseId: str, db: Session = Depends(get_db)):
+async def verify_deposit_confirm(request: Request, caseId: str, db: Session = Depends(get_db)):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    return templates.TemplateResponse("action_confirm.html", {
+        "request": request, "case": case, "action_title": "Verify Deposit", "post_url": "/transactions/verify", "token": ""
+    })
+
+@router.post("/verify", response_class=HTMLResponse)
+async def verify_deposit(request: Request, caseId: str = Form(...), db: Session = Depends(get_db)):
     """Mocks Etherscan Verification and confirms funding."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
@@ -39,9 +47,18 @@ async def verify_deposit(request: Request, caseId: str, db: Session = Depends(ge
                 if data.get("status") == "1":
                     total_deposited = Decimal(0)
                     for tx in data.get("result", []):
-                        # Match buyer to escrow deposits
+                        # Match buyer to escrow deposits AND match hex input data to Case ID
+                        input_hex = tx.get("input", "")
+                        # decode hex input, strip "0x"
+                        try:
+                            input_text = bytes.fromhex(input_hex[2:]).decode('utf-8', 'ignore') if len(input_hex) > 2 else ""
+                        except:
+                            input_text = ""
+                        
                         if tx.get("from", "").lower() == case.buyer_wallet.lower() and tx.get("to", "").lower() == ESCROW_WALLET.lower():
-                            total_deposited += Decimal(tx.get("value", "0"))
+                            # Enforce case_id matching in transaction data to prevent cross-case misattribution
+                            if case.case_id in input_text or not input_text:
+                                total_deposited += Decimal(tx.get("value", "0"))
                     case.deposited_fund = total_deposited
         except Exception as e:
             print(f"Etherscan error: {e}")
@@ -133,17 +150,19 @@ async def request_action(
         if not is_seller: return HTMLResponse("Only seller can request payment", status_code=403)
         case.payment_request_time = datetime.now(timezone.utc)
         case.requested_payment_amount = amount_wei
-        if tip_eth > 0: case.tip_to_seller = int(tip_eth * 1e18)
+        if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(tip_eth * 1e18)
         db.commit()
-        # TODO: send email to buyer with approve/dispute links
+        if hasattr(email_service, "send_payment_requested"):
+            email_service.send_payment_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, case.buyer_token)
         msg = "Payment request submitted to Buyer."
     elif actionType == "request_refund":
         if not is_buyer: return HTMLResponse("Only buyer can request refund", status_code=403)
         case.refund_request_time = datetime.now(timezone.utc)
         case.requested_refund_amount = amount_wei
-        if withdrawal_eth > 0: case.buyer_withdrawal = int(withdrawal_eth * 1e18)
+        if withdrawal_eth > 0: case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + int(withdrawal_eth * 1e18)
         db.commit()
-        # TODO: send email to seller with approve/dispute links
+        if hasattr(email_service, "send_refund_requested"):
+            email_service.send_refund_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, case.seller_token)
         msg = "Refund request submitted to Seller."
     else:
         return HTMLResponse("Invalid action", status_code=400)
@@ -152,8 +171,17 @@ async def request_action(
         "request": request, "case": case, "action_message": msg
     })
 
-@router.get("/approve", response_class=HTMLResponse)
-async def approve_transaction(request: Request, caseId: str, token: str, actionType: str, db: Session = Depends(get_db)):
+@router.get("/approve-confirm", response_class=HTMLResponse)
+async def approve_transaction_confirm(request: Request, caseId: str, token: str, actionType: str, db: Session = Depends(get_db)):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    action_title = "Approve Payment to Seller" if actionType == "request_payment" else "Approve Refund to Buyer"
+    return templates.TemplateResponse("action_confirm.html", {
+        "request": request, "case": case, "action_title": action_title, "post_url": "/transactions/approve", "token": token, "actionType": actionType
+    })
+
+@router.post("/approve", response_class=HTMLResponse)
+async def approve_transaction(request: Request, caseId: str = Form(...), token: str = Form(...), actionType: str = Form(...), db: Session = Depends(get_db)):
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case: return HTMLResponse("Case not found", status_code=404)
     is_buyer = secrets.compare_digest(token, case.buyer_token)
@@ -183,16 +211,42 @@ async def approve_transaction(request: Request, caseId: str, token: str, actionT
         case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
         case.refund_request_time = None
         case.requested_refund_amount = None
+        
+        # Add tip to seller payout if tip exists, and subtract withdrawal from buyer payout if exists
+        # Execute blockchain transfer
+        import asyncio
+        from blockchain import transfer_funds
+        try:
+            if remittance > 0 and case.buyer_wallet:
+                asyncio.run(transfer_funds(case.buyer_wallet, remittance))
+        except Exception as e:
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED
         db.commit()
-        # email_service.send_refund_released(...) 
+        
+        if hasattr(email_service, "send_refund_released"):
+            email_service.send_refund_released(
+                case_id=case.case_id,
+                seller_name=case.seller, seller_email=case.seller_email,
+                buyer_name=case.buyer,   buyer_email=case.buyer_email,
+                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.CLOSED)
+            )
         return HTMLResponse("Refund Approved and Released.")
     
     return HTMLResponse("Not authorized to approve this action.", status_code=403)
 
-@router.get("/dispute", response_class=HTMLResponse)
-async def dispute_transaction(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
+@router.get("/dispute-confirm", response_class=HTMLResponse)
+async def dispute_transaction_confirm(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    return templates.TemplateResponse("action_confirm.html", {
+        "request": request, "case": case, "action_title": "Dispute Transaction", "post_url": "/transactions/dispute", "token": token
+    })
+
+@router.post("/dispute", response_class=HTMLResponse)
+async def dispute_transaction(request: Request, caseId: str = Form(...), token: str = Form(...), db: Session = Depends(get_db)):
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case: return HTMLResponse("Case not found", status_code=404)
     if not (secrets.compare_digest(token, case.buyer_token) or secrets.compare_digest(token, case.seller_token)):

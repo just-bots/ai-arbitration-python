@@ -161,6 +161,10 @@ def send_case_registered(case_id: str, party: str, name: str, email: str,
                 white-space: pre-wrap; font-family: monospace;">
       <strong style="color:#cbd5e1; font-family: 'Segoe UI',Arial,sans-serif;">Contract Preview:</strong><br><br>{preview}
     </div>
+    
+    <p style="font-size:13px;color:#64748b;">
+      <a href="{BASE_URL}/terms?caseId={case_id}&token={token}" style="color:#a5b4fc;text-decoration:underline;">View Full Legal Agreement</a>
+    </p>
 
     <p><strong>Action required — please respond within 7 days:</strong></p>
     {_btn(accept_url, "✅  Accept Contract", "#16a34a")}
@@ -303,6 +307,22 @@ def send_payment_released(case_id: str, seller_name: str, seller_email: str,
         send_email(email, f"Payment Released ({case_id})",
                    _wrap_html("Payment Released", body))
 
+def send_refund_released(case_id: str, seller_name: str, seller_email: str,
+                           buyer_name: str, buyer_email: str,
+                           amount_eth: float, closed: bool) -> None:
+    """Sent to both parties after a refund is released to the Buyer."""
+    status_note = "The case is now <strong>CLOSED</strong>." if closed else "Partial refund released — case remains active."
+    for name, email in [(seller_name, seller_email), (buyer_name, buyer_email)]:
+        body = f"""
+        <p>Hello <strong>{name}</strong>,</p>
+        <p>A refund of <strong>{amount_eth:.6f} ETH</strong> has been released to the Buyer
+           for case <strong>{case_id}</strong>.</p>
+        {_case_badge(case_id)}
+        <p>{status_note}</p>
+        """
+        send_email(email, f"Refund Released ({case_id})",
+                   _wrap_html("Refund Released", body))
+
 
 def send_refund_requested(case_id: str,
                            seller_name: str, seller_email: str,
@@ -319,6 +339,20 @@ def send_refund_requested(case_id: str,
         """
         send_email(email, f"Refund Requested — Case Disputed ({case_id})",
                    _wrap_html("Case Disputed", body))
+
+def send_payment_requested(case_id: str,
+                           seller_name: str, seller_email: str,
+                           buyer_name: str, buyer_email: str, buyer_token: str) -> None:
+    """Sent to both parties when the Seller requests a payment."""
+    for name, email in [(seller_name, seller_email), (buyer_name, buyer_email)]:
+        body = f"""
+        <p>Hello <strong>{name}</strong>,</p>
+        <p>The Seller has requested a payment for case <strong>{case_id}</strong>.</p>
+        {_case_badge(case_id)}
+        <p>The Buyer has <strong>7 days</strong> to approve or dispute this request.</p>
+        """
+        send_email(email, f"Payment Requested ({case_id})",
+                   _wrap_html("Payment Requested", body))
 
 
 # ── Prosecution emails ───────────────────────────────────────────────────────

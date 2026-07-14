@@ -14,12 +14,12 @@ def check_disputed_cases():
     print("[Scheduler] Checking for ripe disputed cases (past evidence window)...")
     db = SessionLocal()
     try:
-        # User requested 12-hour timeout
-        twelve_hours_ago = datetime.now(timezone.utc) - timedelta(hours=12)
+        # User requested 7-day timeout for disputes
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         cases = db.query(Case).filter(
             Case.status == StatusEnum.DISPUTED,
             Case.dispute_time != None,
-            Case.dispute_time <= twelve_hours_ago
+            Case.dispute_time <= seven_days_ago
         ).all()
         for case in cases:
             print(f"[Scheduler] Triggering adjudication for {case.case_id}")
@@ -36,15 +36,15 @@ def check_disputed_cases():
         db.close()
 
 def check_transaction_timeouts():
-    print("[Scheduler] Checking for 12-hr transaction timeouts...")
+    print("[Scheduler] Checking for 7-day transaction timeouts...")
     db = SessionLocal()
     try:
-        twelve_hours_ago = datetime.now(timezone.utc) - timedelta(hours=12)
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         
         # Check payment requests
         payment_cases = db.query(Case).filter(
             Case.payment_request_time != None,
-            Case.payment_request_time <= twelve_hours_ago
+            Case.payment_request_time <= seven_days_ago
         ).all()
         
         for case in payment_cases:
@@ -67,7 +67,7 @@ def check_transaction_timeouts():
         # Check refund requests
         refund_cases = db.query(Case).filter(
             Case.refund_request_time != None,
-            Case.refund_request_time <= twelve_hours_ago
+            Case.refund_request_time <= seven_days_ago
         ).all()
         
         for case in refund_cases:
@@ -83,6 +83,60 @@ def check_transaction_timeouts():
     finally:
         db.close()
 
+import asyncio
+from blockchain import transfer_funds
+
+def hourly_auto_distribute():
+    print("[Scheduler] Checking for DISTRIBUTED cases to execute on-chain transfer...")
+    db = SessionLocal()
+    try:
+        # Also check for DECIDED_LOCKED cases where 7-day appeal window has lapsed
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        lapsed_cases = db.query(Case).filter(
+            Case.status == StatusEnum.DECIDED_LOCKED,
+            Case.determination_time != None,
+            Case.determination_time <= seven_days_ago
+        ).all()
+        
+        for case in lapsed_cases:
+            print(f"[Scheduler] 7-day objection window closed for {case.case_id}. Distributing...")
+            case.status = StatusEnum.DISTRIBUTED
+            db.commit()
+            
+        ready_cases = db.query(Case).filter(Case.status == StatusEnum.DISTRIBUTED).all()
+        
+        for case in ready_cases:
+            try:
+                seller_award = int(case.seller_award or 0)
+                buyer_award = int(case.buyer_award or 0)
+                
+                # Double check idempotency
+                if int(case.payment_to_seller or 0) > 0 or int(case.refund_to_buyer or 0) > 0:
+                    print(f"Skipping {case.case_id}: already partially distributed.")
+                    continue
+                    
+                # Execute Blockchain transfers
+                if seller_award > 0 and case.seller_wallet:
+                    asyncio.run(transfer_funds(case.seller_wallet, seller_award))
+                if buyer_award > 0 and case.buyer_wallet:
+                    asyncio.run(transfer_funds(case.buyer_wallet, buyer_award))
+                    
+                case.payment_to_seller = seller_award
+                case.refund_to_buyer = buyer_award
+                case.status = StatusEnum.CLOSED if (seller_award > 0 or buyer_award > 0) else StatusEnum.CLOSED_NO_AWARD
+                db.commit()
+                
+                # Notify
+                email_service.send_award_distributed(
+                    case_id=case.case_id,
+                    seller_name=case.seller, seller_email=case.seller_email, seller_award_eth=seller_award/1e18,
+                    buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_award_eth=buyer_award/1e18
+                )
+            except Exception as e:
+                print(f"Error distributing funds for {case.case_id}: {e}")
+    finally:
+        db.close()
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
     
@@ -90,6 +144,9 @@ def start_scheduler():
     scheduler.add_job(check_disputed_cases, 'interval', minutes=5)
     scheduler.add_job(check_transaction_timeouts, 'interval', minutes=5)
     scheduler.add_job(process_inbound_emails, 'interval', minutes=5)
+    
+    # Run distribution hourly
+    scheduler.add_job(hourly_auto_distribute, 'interval', minutes=60)
     
     scheduler.start()
     return scheduler

@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block title %}Legal Agreement | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card">
+    <div class="card-header">
+        <h1>Full Legal Agreement</h1>
+        <p>Case ID: {{ case.case_id }}</p>
+    </div>
+    
+    <div style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; white-space: pre-wrap; font-family: monospace; color: #cbd5e1; border-left: 4px solid #4f46e5;">
+{{ case.contract_text }}
+    </div>
+    
+    <p style="text-align: center; color: #94a3b8; font-size: 14px;">
+        This document is legally binding on the Ethereum blockchain under smart-contract arbitration framework.
+    </p>
+</div>
+{% endblock %}

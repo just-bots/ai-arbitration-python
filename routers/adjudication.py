@@ -85,6 +85,44 @@ def read_evidence_file(file_hash: str) -> str:
     finally:
         db.close()
 
+import ast
+import operator
+import httpx
+
+@tool
+def calculator(expression: str) -> str:
+    """Evaluates a mathematical expression (e.g. '1000 * 0.15' or '(500 + 200) / 2').
+    Use this to calculate exact Wei amounts for fractional damage awards."""
+    try:
+        # Safe math evaluation using ast
+        def eval_expr(node):
+            if isinstance(node, ast.Num): return node.n
+            elif isinstance(node, ast.BinOp):
+                op_map = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
+                return op_map[type(node.op)](eval_expr(node.left), eval_expr(node.right))
+            elif isinstance(node, ast.UnaryOp):
+                if isinstance(node.op, ast.USub): return -eval_expr(node.operand)
+                elif isinstance(node.op, ast.UAdd): return eval_expr(node.operand)
+            raise ValueError("Unsupported operation")
+        
+        result = eval_expr(ast.parse(expression, mode='eval').body)
+        return str(result)
+    except Exception as e:
+        return f"Calculation error: {e}"
+
+@tool
+def external_verification(url: str) -> str:
+    """Fetches the text content of a public URL (HTTP GET).
+    Use this to verify tracking numbers, public pricing, or reference data."""
+    try:
+        resp = httpx.get(url, timeout=10.0, follow_redirects=True)
+        if resp.status_code != 200:
+            return f"Error: HTTP {resp.status_code}"
+        # Return first 2000 chars of text to avoid context overload
+        return resp.text[:2000]
+    except Exception as e:
+        return f"Fetch error: {e}"
+
 @router.post("/run", response_class=HTMLResponse)
 async def run_adjudication(request: Request, caseId: str = Form(...), db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     """Executes the two-stage AI adjudication process."""
@@ -199,23 +237,18 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         "- `contradictions`: Array of conflicts between claims/evidence or between parties\n"
         "- `unsubstantiated_claims`: Array of claims lacking evidence\n"
         "- `reasoning`: Explanation of how facts support your payout recommendation\n"
-        "- `recommended_buyer_payout`: Wei string (must sum with seller payout to escrow_balance)\n"
-        "- `recommended_seller_payout`: Wei string (must sum with buyer payout to escrow_balance)\n"
-    )
-    
     # Create the agent
     magistrate_prompt = ChatPromptTemplate.from_messages([
-        ("system", magistrate_system_prompt),
-        ("user", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ("system", "You are the AI Magistrate Judge. Investigate the case details, read the contract, use the calculator tool for damage math, and use the external_verification tool if a URL or tracking number needs checking. Summarize your factual findings, including a precise mathematical breakdown of the proposed award."),
+        ("human", "{input}"),
+        ("placeholder", "{agent_scratchpad}")
     ])
     
-    tools = [read_evidence_file]
-    magistrate_agent = create_tool_calling_agent(resilient_llm, tools, magistrate_prompt)
-    magistrate_executor = AgentExecutor(agent=magistrate_agent, tools=tools, verbose=True)
+    agent = create_tool_calling_agent(resilient_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
+    agent_executor = AgentExecutor(agent=agent, tools=[read_evidence_file, calculator, external_verification], verbose=True)
     
     try:
-        raw_report = magistrate_executor.invoke({"input": user_prompt})["output"]
+        raw_report = agent_executor.invoke({"input": user_prompt})["output"]
         # Extract the structured JSON from the raw report text using the resilient LLM
         magistrate_report = resilient_llm.with_structured_output(MagistrateReport).invoke(
             f"Extract the magistrate report strictly matching the JSON schema from this text:\\n\\n{raw_report}"

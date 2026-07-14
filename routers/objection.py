@@ -145,14 +145,26 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
         return HTMLResponse("Invalid token", status_code=403)
         
     if action == "uphold":
-        # Idempotency check: Guard against double-payout
-        if int(case.payment_to_seller or 0) > 0 or int(case.refund_to_buyer or 0) > 0:
+        # Idempotency check: Guard against double-payout using dedicated payout fields
+        if int(case.seller_payout or 0) > 0 or int(case.buyer_payout or 0) > 0:
             return HTMLResponse("Funds have already been distributed.", status_code=400)
             
-        case.payment_to_seller = int(case.seller_award or 0)
-        case.refund_to_buyer = int(case.buyer_award or 0)
+        case.seller_payout = int(case.seller_award or 0)
+        case.buyer_payout = int(case.buyer_award or 0)
         
-        if case.payment_to_seller == 0 and case.refund_to_buyer == 0:
+        # Trigger blockchain transfers
+        import asyncio
+        from blockchain import transfer_funds
+        try:
+            if case.seller_payout > 0 and case.seller_wallet:
+                asyncio.run(transfer_funds(case.seller_wallet, case.seller_payout))
+            if case.buyer_payout > 0 and case.buyer_wallet:
+                asyncio.run(transfer_funds(case.buyer_wallet, case.buyer_payout))
+        except Exception as e:
+            print(f"Transfer error: {e}")
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+        
+        if case.seller_payout == 0 and case.buyer_payout == 0:
             case.status = StatusEnum.CLOSED_NO_AWARD
         else:
             case.status = StatusEnum.CLOSED

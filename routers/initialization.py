@@ -159,10 +159,18 @@ async def create_case(
 async def success_page(request: Request, case_id: str, db: Session = Depends(get_db)):
     """Renders the success confirmation page."""
     case = db.query(Case).filter(Case.case_id == case_id).first()
-    if not case:
-        return HTMLResponse("Case not found", status_code=404)
-        
+    if not case: return HTMLResponse("Case not found", status_code=404)
     return templates.TemplateResponse("success.html", {"request": request, "case": case})
+
+@router.get("/terms", response_class=HTMLResponse)
+async def view_terms(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
+    """Displays the full legal agreement text."""
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    if not secrets.compare_digest(token, case.buyer_token) and not secrets.compare_digest(token, case.seller_token):
+        return HTMLResponse("Invalid token", status_code=403)
+        
+    return templates.TemplateResponse("terms.html", {"request": request, "case": case})
 
 @router.get("/response", response_class=HTMLResponse)
 async def signature_confirm(
@@ -281,9 +289,9 @@ async def wallet_form(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    if party.lower() == "seller" and token != case.seller_token:
+    if party.lower() == "seller" and not secrets.compare_digest(token, case.seller_token):
         return HTMLResponse("Invalid token", status_code=403)
-    elif party.lower() == "buyer" and token != case.buyer_token:
+    elif party.lower() == "buyer" and not secrets.compare_digest(token, case.buyer_token):
         return HTMLResponse("Invalid token", status_code=403)
         
     return templates.TemplateResponse("wallet_form.html", {"request": request, "case": case, "party": party, "token": token})
@@ -301,9 +309,9 @@ async def wallet_submit(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    if party.lower() == "seller" and token != case.seller_token:
+    if party.lower() == "seller" and not secrets.compare_digest(token, case.seller_token):
         return HTMLResponse("Invalid token", status_code=403)
-    elif party.lower() == "buyer" and token != case.buyer_token:
+    elif party.lower() == "buyer" and not secrets.compare_digest(token, case.buyer_token):
         return HTMLResponse("Invalid token", status_code=403)
 
     # Server-side validation for wallet
