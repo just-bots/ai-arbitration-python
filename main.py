@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+# Load environment variables from .env file (must be before any other imports that read os.environ)
+from dotenv import load_dotenv
+load_dotenv()
+
 # Import modular routers
 from routers import initialization, transactions, prosecution, adjudication, objection
 from routers.exceptions import register_exception_handlers
