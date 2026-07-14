@@ -157,9 +157,9 @@ def send_case_registered(case_id: str, party: str, name: str, email: str,
     <p><strong>Escrow Required:</strong> {escrow_eth} ETH</p>
 
     <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:16px;
-                margin:16px 0;font-size:13px;color:#94a3b8;border-left:3px solid #4f46e5;">
-      <strong style="color:#cbd5e1;">Contract Preview:</strong><br><br>
-      {preview}
+                margin:16px 0;font-size:13px;color:#94a3b8;border-left:3px solid #4f46e5;
+                white-space: pre-wrap; font-family: monospace;">
+      <strong style="color:#cbd5e1; font-family: 'Segoe UI',Arial,sans-serif;">Contract Preview:</strong><br><br>{preview}
     </div>
 
     <p><strong>Action required — please respond within 7 days:</strong></p>
