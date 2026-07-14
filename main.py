@@ -24,3 +24,14 @@ app.include_router(objection.router)
 # Register the global exception handler (mirrors Exceptions.json)
 # Must be called AFTER app is created and BEFORE routes are added
 register_exception_handlers(app)
+
+from scheduler import start_scheduler
+
+@app.on_event("startup")
+def startup_event():
+    app.state.scheduler = start_scheduler()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.shutdown()

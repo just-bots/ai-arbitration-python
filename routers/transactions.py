@@ -76,115 +76,132 @@ async def verify_deposit(request: Request, caseId: str, db: Session = Depends(ge
     })
 
 @router.get("/action", response_class=HTMLResponse)
-async def transaction_action(
+async def transaction_action_form(
     request: Request, 
     caseId: str, 
     token: str, 
     actionType: str,
     db: Session = Depends(get_db)
 ):
-    """Handles releasing payment or requesting a refund."""
+    """Renders the form to request a payment or refund."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    # Validate tokens
     is_buyer = secrets.compare_digest(token, case.buyer_token)
     is_seller = secrets.compare_digest(token, case.seller_token)
-    
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
         
-    action_message = ""
+    escrow_fund       = int(case.escrow_fund       or 0)
+    payment_to_seller = int(case.payment_to_seller or 0)
+    refund_to_buyer   = int(case.refund_to_buyer   or 0)
+    remaining_eth = (escrow_fund - payment_to_seller - refund_to_buyer) / 1e18
+
+    party = "Buyer" if is_buyer else "Seller"
+
+    return templates.TemplateResponse("action_form.html", {
+        "request": request,
+        "case": case,
+        "party": party,
+        "token": token,
+        "actionType": actionType,
+        "remaining_eth": remaining_eth
+    })
+
+@router.post("/request-action", response_class=HTMLResponse)
+async def request_action(
+    request: Request,
+    caseId: str = Form(...),
+    token: str = Form(...),
+    actionType: str = Form(...),
+    amount_eth: float = Form(...),
+    tip_eth: float = Form(0.0),
+    withdrawal_eth: float = Form(0.0),
+    db: Session = Depends(get_db)
+):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
     
-    if actionType == "release_payment":
-        if case.status in [StatusEnum.TRANSFERRED_TO_SELLER, StatusEnum.CLOSED]:
-            return HTMLResponse("Payment has already been released.", status_code=400)
-            
-        # Only the Buyer can release payment to the Seller (n8n: Conditions2 → token matches Seller Token)
-        if not is_buyer:
-            return HTMLResponse("Only the buyer can release payment", status_code=403)
+    is_buyer = secrets.compare_digest(token, case.buyer_token)
+    is_seller = secrets.compare_digest(token, case.seller_token)
+    if not is_buyer and not is_seller: return HTMLResponse("Invalid token", status_code=403)
 
-        # Calculate remaining escrow balance (mirrors n8n's Calculate Amount node)
-        escrow_fund       = int(case.escrow_fund       or 0)
-        payment_to_seller = int(case.payment_to_seller or 0)
-        refund_to_buyer   = int(case.refund_to_buyer   or 0)
-        tip_to_seller     = int(case.tip_to_seller     or 0)
-        buyer_withdrawal  = int(case.buyer_withdrawal  or 0)
-        deposited_fund    = int(case.deposited_fund    or 0)
-        fee               = int(case.fee               or 0)
+    amount_wei = str(int(amount_eth * 1e18))
 
-        # Available escrow balance (n8n: escrow = Escrow Fund - Payment to Seller - Refund to Buyer)
-        remaining_escrow = escrow_fund - payment_to_seller - refund_to_buyer
-        # Liquid balance in the actual deposited pot
-        liquid_balance = deposited_fund - fee - tip_to_seller - buyer_withdrawal - payment_to_seller - refund_to_buyer
+    if actionType == "request_payment":
+        if not is_seller: return HTMLResponse("Only seller can request payment", status_code=403)
+        case.payment_request_time = datetime.now(timezone.utc)
+        case.requested_payment_amount = amount_wei
+        if tip_eth > 0: case.tip_to_seller = int(tip_eth * 1e18)
+        db.commit()
+        # TODO: send email to buyer with approve/dispute links
+        msg = "Payment request submitted to Buyer."
+    elif actionType == "request_refund":
+        if not is_buyer: return HTMLResponse("Only buyer can request refund", status_code=403)
+        case.refund_request_time = datetime.now(timezone.utc)
+        case.requested_refund_amount = amount_wei
+        if withdrawal_eth > 0: case.buyer_withdrawal = int(withdrawal_eth * 1e18)
+        db.commit()
+        # TODO: send email to seller with approve/dispute links
+        msg = "Refund request submitted to Seller."
+    else:
+        return HTMLResponse("Invalid action", status_code=400)
 
-        if remaining_escrow <= 0 or liquid_balance <= 0:
-            return HTMLResponse("No escrow balance available to release.", status_code=400)
+    return templates.TemplateResponse("transaction_action.html", {
+        "request": request, "case": case, "action_message": msg
+    })
 
-        # Remittance is the full remaining escrow amount (buyer releases everything)
-        remittance = min(remaining_escrow, liquid_balance)
+@router.get("/approve", response_class=HTMLResponse)
+async def approve_transaction(request: Request, caseId: str, token: str, actionType: str, db: Session = Depends(get_db)):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    is_buyer = secrets.compare_digest(token, case.buyer_token)
+    is_seller = secrets.compare_digest(token, case.seller_token)
+    if not is_buyer and not is_seller: return HTMLResponse("Invalid token", status_code=403)
 
-        # Increment Payment to Seller (n8n: Record Payment1)
-        case.payment_to_seller = payment_to_seller + remittance
-
-        # Status = CLOSED only if entire escrow fund has been paid out (n8n: TRANSFERRED to Seller)
-        new_payment_total = payment_to_seller + remittance
-        if new_payment_total >= escrow_fund:
+    if actionType == "request_payment" and is_buyer:
+        # Buyer approves seller's payment
+        remittance = int(case.requested_payment_amount or 0)
+        case.payment_to_seller = int(case.payment_to_seller or 0) + remittance
+        case.payment_request_time = None
+        case.requested_payment_amount = None
+        if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.TRANSFERRED_TO_SELLER
-
-        action_message = f"Payment of {remittance / 1e18:.6f} ETH successfully released to the Seller."
-        if case.status == StatusEnum.TRANSFERRED_TO_SELLER:
-            action_message += " The case is now TRANSFERRED to Seller."
-
         db.commit()
         email_service.send_payment_released(
             case_id=case.case_id,
             seller_name=case.seller, seller_email=case.seller_email,
             buyer_name=case.buyer,   buyer_email=case.buyer_email,
-            amount_eth=remittance / 1e18,
-            closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER)
+            amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER)
         )
-    elif actionType == "request_refund":
-        if case.status == StatusEnum.DISPUTED:
-            return HTMLResponse("Refund already requested (case is already disputed).", status_code=400)
-        if case.status in [StatusEnum.TRANSFERRED_TO_SELLER, StatusEnum.CLOSED]:
-            return HTMLResponse("Cannot request refund, payment has already been released.", status_code=400)
-            
-        # Only the Buyer can request a refund
-        if not is_buyer:
-            return HTMLResponse("Only the buyer can request a refund", status_code=403)
-
-        # n8n: Record Dispute1 — Status=DISPUTED, Dispute Time=now
-        case.status = StatusEnum.DISPUTED
-        case.dispute_time = datetime.now(timezone.utc)
-        case.refund_request_time = datetime.now(timezone.utc)
-        action_message = "Refund requested. This case has been officially escalated to DISPUTED status."
-
-        # Log this event in the messages table (n8n: Record Message, Label=Dispute)
-        dispute_msg = Message(
-            case_id=case.case_id,
-            time=datetime.now(timezone.utc),
-            sender=RoleEnum.BUYER,
-            email=case.buyer_email,
-            content="Buyer has requested a refund and disputed the contract.",
-            label=LabelEnum.DISPUTE
-        )
-        db.add(dispute_msg)
-        db.commit()
-        email_service.send_refund_requested(
-            case_id=case.case_id,
-            seller_name=case.seller, seller_email=case.seller_email,
-            buyer_name=case.buyer,   buyer_email=case.buyer_email
-        )
-
-    else:
-        return HTMLResponse("Unknown action", status_code=400)
+        return HTMLResponse("Payment Approved and Released.")
         
-    db.commit()
+    elif actionType == "request_refund" and is_seller:
+        # Seller approves buyer's refund
+        remittance = int(case.requested_refund_amount or 0)
+        case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
+        case.refund_request_time = None
+        case.requested_refund_amount = None
+        if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
+            case.status = StatusEnum.CLOSED
+        db.commit()
+        # email_service.send_refund_released(...) 
+        return HTMLResponse("Refund Approved and Released.")
+    
+    return HTMLResponse("Not authorized to approve this action.", status_code=403)
 
-    return templates.TemplateResponse("transaction_action.html", {
-        "request": request,
-        "case": case,
-        "action_message": action_message
-    })
+@router.get("/dispute", response_class=HTMLResponse)
+async def dispute_transaction(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    if not (secrets.compare_digest(token, case.buyer_token) or secrets.compare_digest(token, case.seller_token)):
+        return HTMLResponse("Invalid token", status_code=403)
+
+    case.status = StatusEnum.DISPUTED
+    case.dispute_time = datetime.now(timezone.utc)
+    case.payment_request_time = None
+    case.refund_request_time = None
+    db.commit()
+    return HTMLResponse("Transaction Disputed. Case is now in DISPUTED status.")
+

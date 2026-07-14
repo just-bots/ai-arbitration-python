@@ -69,6 +69,8 @@ class Case(Base):
     status = Column(SQLEnum(StatusEnum))
     payment_request_time = Column(DateTime(timezone=True))
     refund_request_time = Column(DateTime(timezone=True))
+    requested_payment_amount = Column(String(255))
+    requested_refund_amount = Column(String(255))
     dispute_time = Column(DateTime(timezone=True))
     adjudication_time = Column(DateTime(timezone=True))
     determination_time = Column(DateTime(timezone=True))

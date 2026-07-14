@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+
+{% block title %}Request Transaction | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card">
+    <div class="card-header">
+        <h1>Request {{ "Payment" if actionType == 'request_payment' else "Refund" }}</h1>
+        <p>Case ID: {{ case.case_id }} | You are acting as: <strong>{{ party }}</strong></p>
+    </div>
+    
+    <div style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
+        <h3 style="margin-top: 0;">Escrow Summary</h3>
+        <p><strong>Total Escrow Fund:</strong> {{ (case.escrow_fund or 0) / 1000000000000000000 }} ETH</p>
+        <p><strong>Remaining Escrow:</strong> {{ remaining_eth }} ETH</p>
+    </div>
+
+    <form action="/transactions/request-action" method="POST">
+        <input type="hidden" name="caseId" value="{{ case.case_id }}">
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="hidden" name="actionType" value="{{ actionType }}">
+        
+        <div class="form-group">
+            <label for="amount_eth">Amount to Request (ETH)</label>
+            <input type="number" step="0.000001" min="0" max="{{ remaining_eth }}" id="amount_eth" name="amount_eth" class="form-control" placeholder="e.g. 0.5" required>
+            <small style="color: #94a3b8; display: block; margin-top: 0.5rem;">Enter the exact amount you wish to request from the remaining escrow.</small>
+        </div>
+        
+        {% if actionType == 'request_payment' %}
+        <div class="form-group">
+            <label for="tip_eth">Tip to Seller (ETH) - Optional</label>
+            <input type="number" step="0.000001" min="0" id="tip_eth" name="tip_eth" class="form-control" placeholder="e.g. 0.01">
+        </div>
+        {% elif actionType == 'request_refund' %}
+        <div class="form-group">
+            <label for="withdrawal_eth">Buyer Withdrawal (ETH) - Optional</label>
+            <input type="number" step="0.000001" min="0" id="withdrawal_eth" name="withdrawal_eth" class="form-control" placeholder="e.g. 0.01">
+        </div>
+        {% endif %}
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Submit Request</button>
+    </form>
+</div>
+{% endblock %}
