@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+
+{% block title %}Case Created | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card success-card">
+    <div class="success-icon">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+    </div>
+    
+    <h1>Case Successfully Created</h1>
+    
+    <div class="case-id-box">
+        <span class="label">Case ID</span>
+        <span class="value">{{ case.case_id }}</span>
+    </div>
+
+    <div class="success-details">
+        <p>The contract has been securely hashed and stored in the database. The initial Setup message has been logged.</p>
+        <p class="highlight-text">
+            <strong>Check the terminal!</strong> Automated emails containing secure access tokens have been sent to 
+            <em>{{ case.seller_email }}</em> and <em>{{ case.buyer_email }}</em>.
+        </p>
+    </div>
+
+    <div class="form-actions">
+        <a href="/" class="btn-secondary">Create Another Case</a>
+    </div>
+</div>
+{% endblock %}

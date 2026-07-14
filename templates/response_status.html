@@ -1,0 +1,82 @@
+{% extends "layout.html" %}
+
+{% block title %}Response Status | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card success-card">
+    {% if wallet_updated %}
+        <div class="success-icon">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+                <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+                <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
+            </svg>
+        </div>
+        <h1>Wallet Updated</h1>
+        <div class="success-details">
+            <p>Your cryptocurrency wallet address has been securely saved to the case file.</p>
+        </div>
+    {% elif case.seller_response.value == 'decline' or case.buyer_response.value == 'decline' %}
+        <div class="success-icon" style="color: #ef4444; background: rgba(239, 68, 68, 0.1); box-shadow: 0 0 30px rgba(239, 68, 68, 0.2);">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="15" y1="9" x2="9" y2="15"></line>
+                <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+        </div>
+        <h1>Contract Declined</h1>
+        <div class="success-details">
+            <p>The contract has been officially declined. This case has been marked as <strong>DECLINED</strong> and closed.</p>
+        </div>
+    {% elif party|lower == 'seller' and case.seller_response.value == 'accept' %}
+        <div class="success-icon">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+        </div>
+        <h1>Signature Accepted</h1>
+        <div class="success-details">
+            <p>Thank you. Your digital signature has been recorded.</p>
+            {% if case.status.value == 'SIGNED' %}
+                <p class="highlight-text">Both parties have signed! The contract is now <strong>FULLY EXECUTED</strong>.</p>
+            {% else %}
+                <p class="highlight-text">Waiting for the Buyer to accept the contract.</p>
+            {% endif %}
+        </div>
+    {% elif party|lower == 'buyer' and case.buyer_response.value == 'accept' %}
+        <div class="success-icon">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+        </div>
+        <h1>Signature Accepted</h1>
+        <div class="success-details">
+            <p>Thank you. Your digital signature has been recorded.</p>
+            {% if case.status.value == 'SIGNED' %}
+                <p class="highlight-text">Both parties have signed! The contract is now <strong>FULLY EXECUTED</strong>.</p>
+            {% else %}
+                <p class="highlight-text">Waiting for the Seller to accept the contract.</p>
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="success-icon">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 16 12 12 10 12"></polyline>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+        </div>
+        <h1>Action Recorded</h1>
+        <div class="success-details">
+            <p>Your response has been logged in the system.</p>
+        </div>
+    {% endif %}
+
+    <div class="case-id-box" style="margin-top: 1rem;">
+        <span class="label">Case ID</span>
+        <span class="value">{{ case.case_id }}</span>
+    </div>
+</div>
+{% endblock %}

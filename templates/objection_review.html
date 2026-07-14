@@ -1,0 +1,55 @@
+{% extends "layout.html" %}
+
+{% block title %}Admin Review | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 900px; padding: 2rem;">
+    <div style="text-align: center; border-bottom: 2px solid #2c3e50; margin-bottom: 2rem; padding-bottom: 1rem;">
+        <h1 style="color: #2c3e50; text-transform: uppercase;">Human-in-the-Loop Review</h1>
+        <p><strong>Case #{{ case.case_id }}</strong></p>
+    </div>
+
+    {% if not appeal %}
+        <div style="text-align: center; padding: 2rem;">
+            <h2 style="color: #e53e3e;">No Active Objection Found</h2>
+            <p>This case does not have an active procedural objection pending review.</p>
+        </div>
+    {% else %}
+        <div style="display: flex; gap: 2rem; margin-bottom: 2rem;">
+            <!-- AI Ruling Column -->
+            <div style="flex: 1; background: rgba(255,255,255,0.7); padding: 1.5rem; border-radius: 8px; border: 1px solid #e5e7eb;">
+                <h3 style="color: #2c3e50; margin-top: 0;">⚖️ AI Final Decision</h3>
+                <p><strong>Issued:</strong> {{ case.determination_time.strftime('%Y-%m-%d %H:%M UTC') if case.determination_time else 'Unknown' }}</p>
+                <div style="background: rgba(44, 62, 80, 0.05); padding: 1rem; border-left: 3px solid #2c3e50; margin: 1rem 0; font-size: 0.9rem;">
+                    {{ case.decision }}
+                </div>
+            </div>
+
+            <!-- User Objection Column -->
+            <div style="flex: 1; background: rgba(229, 62, 62, 0.05); padding: 1.5rem; border-radius: 8px; border: 1px solid #fc8181;">
+                <h3 style="color: #c53030; margin-top: 0;">🛑 Procedural Objection</h3>
+                <p><strong>Filed By:</strong> {{ appeal.sender.value if appeal.sender else 'Unknown' }} ({{ appeal.email }})</p>
+                <p><strong>Time:</strong> {{ appeal.time.strftime('%Y-%m-%d %H:%M UTC') if appeal.time else 'Unknown' }}</p>
+                <div style="background: white; padding: 1rem; border-radius: 4px; border: 1px solid #fc8181; margin: 1rem 0; font-size: 0.9rem; white-space: pre-wrap;">{{ appeal.content }}</div>
+            </div>
+        </div>
+
+        <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 2rem;">
+            <h3 style="margin-bottom: 1.5rem;">Review Determination</h3>
+            <p style="font-size: 0.9rem; color: #4b5563; margin-bottom: 2rem;">As the human overseer, determine if the AI followed the correct logical and procedural steps based on the submitted evidence.</p>
+            
+            <form action="/objection/review" method="post" style="display: flex; justify-content: center; gap: 1rem;">
+                <input type="hidden" name="caseId" value="{{ case.case_id }}">
+                
+                <button type="submit" name="action" value="uphold" class="btn" style="background: #27AE60; padding: 1rem 2rem; font-size: 1rem;">
+                    ✓ Uphold Ruling (Distribute Funds)
+                </button>
+                
+                <button type="submit" name="action" value="reverse" class="btn" style="background: #e53e3e; padding: 1rem 2rem; font-size: 1rem;">
+                    ↺ Reverse Ruling (Retries AI)
+                </button>
+            </form>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

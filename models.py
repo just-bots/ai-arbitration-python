@@ -102,8 +102,3 @@ class File(Base):
     case = relationship("Case", back_populates="files")
     message = relationship("Message", back_populates="files")
 
-if __name__ == "__main__":
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/arbitration")
-    engine = create_engine(DATABASE_URL)
-    Base.metadata.create_all(engine)
-    print("Database schema created successfully.")

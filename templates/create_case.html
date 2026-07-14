@@ -1,0 +1,81 @@
+{% extends "layout.html" %}
+
+{% block title %}Register Contract | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card">
+    <div class="card-header">
+        <h1>Register Contract</h1>
+        <p>Initialize a new AI arbitration case by uploading the signed agreement and participant details.</p>
+    </div>
+
+    <form action="/create-case" method="POST" enctype="multipart/form-data" class="modern-form">
+        
+        <div class="form-section">
+            <div class="section-badge">1</div>
+            <h2>Seller Details</h2>
+            <div class="form-grid">
+                <div class="input-group">
+                    <label for="seller_name">Full Name</label>
+                    <input type="text" id="seller_name" name="seller_name" required placeholder="e.g. Acme Corp">
+                </div>
+                <div class="input-group">
+                    <label for="seller_email">Email Address</label>
+                    <input type="email" id="seller_email" name="seller_email" required placeholder="seller@example.com">
+                </div>
+                <div class="input-group full-width">
+                    <label for="seller_wallet">Crypto Wallet Address (Optional)</label>
+                    <input type="text" id="seller_wallet" name="seller_wallet" placeholder="0x...">
+                </div>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <div class="section-badge">2</div>
+            <h2>Buyer Details</h2>
+            <div class="form-grid">
+                <div class="input-group">
+                    <label for="buyer_name">Full Name</label>
+                    <input type="text" id="buyer_name" name="buyer_name" required placeholder="e.g. John Doe">
+                </div>
+                <div class="input-group">
+                    <label for="buyer_email">Email Address</label>
+                    <input type="email" id="buyer_email" name="buyer_email" required placeholder="buyer@example.com">
+                </div>
+                <div class="input-group full-width">
+                    <label for="buyer_wallet">Crypto Wallet Address (Optional)</label>
+                    <input type="text" id="buyer_wallet" name="buyer_wallet" placeholder="0x...">
+                </div>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <div class="section-badge">3</div>
+            <h2>Contract Upload</h2>
+            <div class="upload-container">
+                <div class="upload-icon">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                </div>
+                <label for="contract_file" class="upload-label">
+                    <span>Choose a PDF file</span> or drag it here
+                </label>
+                <input type="file" id="contract_file" name="contract_file" accept="application/pdf" required class="file-input">
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn-primary">
+                <span>Create Arbitration Case</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

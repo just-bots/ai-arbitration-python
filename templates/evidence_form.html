@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+
+{% block title %}Submit Evidence | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card">
+    <div class="card-header">
+        <h1>Submit Evidence & Arguments</h1>
+        <p>Case ID: {{ case.case_id }} | You are submitting as: <strong>{{ role }}</strong></p>
+    </div>
+    
+    <div class="alert" style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 1rem; margin-bottom: 1.5rem; color: #b91c1c;">
+        <strong>Notice:</strong> This case is currently in <strong>{{ case.status.value }}</strong>. Ensure you provide all relevant details before the deadline.
+    </div>
+
+    <form action="/prosecution/evidence" method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="caseId" value="{{ case.case_id }}">
+        <input type="hidden" name="token" value="{{ token }}">
+        
+        <div class="form-group">
+            <label for="argument">Your Legal Argument</label>
+            <textarea id="argument" name="argument" rows="8" class="form-control" placeholder="Please detail your argument and refer to the attached evidence..." required></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="files">Attach Evidence (Documents, Images, PDFs)</label>
+            <input type="file" id="files" name="files" class="form-control" multiple>
+            <small style="color: #6b7280; display: block; margin-top: 0.5rem;">All uploaded files will be cryptographically hashed for immutability.</small>
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Submit to Arbitration</button>
+    </form>
+    
+    <div style="margin-top: 2rem; border-top: 1px solid #e5e7eb; padding-top: 1rem;">
+        <h3>Admin Tools</h3>
+        <form action="/prosecution/escalate" method="POST">
+            <input type="hidden" name="caseId" value="{{ case.case_id }}">
+            <button type="submit" class="btn" style="background: #ef4444; color: white;">Force Escalate to Adjudication (Simulate Deadline)</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+
+{% block title %}Evidence Submitted | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card success-card">
+    <div class="success-icon" style="background: rgba(39, 174, 96, 0.1); color: #27ae60;">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+    </div>
+    <h1>Evidence Successfully Logged</h1>
+    <div class="success-details">
+        <p>Your arguments and supporting files have been securely saved to the database.</p>
+    </div>
+
+    {% if files_info %}
+    <div style="margin-top: 2rem; text-align: left;">
+        <h3 style="margin-bottom: 1rem;">Cryptographic Proof (SHA-256)</h3>
+        <p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 1rem;">Your files have been securely hashed. These hashes act as an immutable fingerprint, ensuring your evidence cannot be tampered with.</p>
+        
+        <ul style="list-style: none; padding: 0;">
+            {% for file in files_info %}
+            <li style="background: rgba(255,255,255,0.5); padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; border: 1px solid #e5e7eb;">
+                <strong>{{ file.filename }}</strong><br>
+                <code style="display: block; margin-top: 0.5rem; color: #10b981; font-size: 0.8rem; word-break: break-all;">{{ file.hash }}</code>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="case-id-box" style="margin-top: 1.5rem;">
+        <span class="label">Case ID</span>
+        <span class="value">{{ case.case_id }}</span>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,226 @@
+import hashlib
+import os
+import secrets
+import uuid
+from datetime import datetime, timezone
+from fastapi import APIRouter, Request, Form, UploadFile, File, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models import Case, Message, File as DBFile, StatusEnum, LabelEnum, RoleEnum, ResponseEnum
+
+# Platform constants from environment (mirrors n8n $vars)
+ESCROW_WALLET    = os.environ.get("ESCROW_WALLET", "0x0000000000000000000000000000000000000000")
+PROCESSING_FEE   = int(os.environ.get("PROCESSING_FEE", "1000000000000000"))  # Wei; default 0.001 ETH
+BASE_URL         = os.environ.get("BASE_URL", "http://localhost:8000/")
+
+router = APIRouter()
+templates = Jinja2Templates(directory="templates")
+
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+@router.get("/", response_class=HTMLResponse)
+async def create_case_form(request: Request):
+    """Renders the HTML form to register a new contract."""
+    return templates.TemplateResponse("create_case.html", {"request": request})
+
+@router.post("/create-case", response_class=HTMLResponse)
+async def create_case(
+    request: Request,
+    seller_name: str = Form(...),
+    seller_email: str = Form(...),
+    seller_wallet: str = Form(...),
+    buyer_name: str = Form(...),
+    buyer_email: str = Form(...),
+    buyer_wallet: str = Form(...),
+    escrow_fund_eth: float = Form(...),   # Required escrow in ETH (n8n: EscrowFundETH field)
+    contract_file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """Handles the form submission, saves the file, and inserts into DB."""
+
+    # n8n: EscrowFund = EscrowFundETH * 1e18 (stored as Wei integer)
+    # n8n: Fee = $vars.PROCESSING_FEE (platform constant, not user-supplied)
+    escrow_fund_wei = int(escrow_fund_eth * 1e18)
+    fee_wei         = PROCESSING_FEE
+    # 1. Generate IDs and Tokens
+    case_id = f"CASE-{secrets.token_hex(4).upper()}"
+    seller_token = secrets.token_urlsafe(16)
+    buyer_token = secrets.token_urlsafe(16)
+    
+    # 2. Save the uploaded file securely and calculate hash
+    secure_filename = f"{uuid.uuid4()}_{contract_file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, secure_filename)
+    
+    file_content = await contract_file.read()
+    file_hash = hashlib.sha256(file_content).hexdigest()
+    
+    with open(file_path, "wb") as f:
+        f.write(file_content)
+        
+    now = datetime.now(timezone.utc)
+    
+    # 3. Create Case Record
+    new_case = Case(
+        case_id=case_id,
+        created_at=now,
+        seller=seller_name,
+        buyer=buyer_name,
+        seller_email=seller_email,
+        buyer_email=buyer_email,
+        seller_token=seller_token,
+        buyer_token=buyer_token,
+        seller_wallet=seller_wallet,
+        buyer_wallet=buyer_wallet,
+        # Financials in Wei (n8n: EscrowFund in wei, Fee = $vars.PROCESSING_FEE in wei)
+        escrow_fund=escrow_fund_wei,
+        fee=fee_wei,
+        escrow_address=ESCROW_WALLET,
+        # Accumulators start at 0
+        payment_to_seller=0,
+        refund_to_buyer=0,
+        tip_to_seller=0,
+        buyer_withdrawal=0,
+        status=StatusEnum.PENDING
+    )
+    db.add(new_case)
+    db.commit()
+    db.refresh(new_case)
+    
+    # 4. Create Initial Setup Message
+    setup_message = Message(
+        case_id=case_id,
+        time=now,
+        sender=RoleEnum.SYSTEM,
+        email="system@ai-arbitration.local",
+        content=f"Case created. Contract {contract_file.filename} uploaded.",
+        label=LabelEnum.SETUP
+    )
+    db.add(setup_message)
+    db.commit()
+    db.refresh(setup_message)
+    
+    # 5. Create File Record linked to Case and Message
+    db_file = DBFile(
+        file_id=str(uuid.uuid4()),
+        case_id=case_id,
+        message_id=setup_message.id,
+        time=now,
+        submitter=RoleEnum.SYSTEM,
+        email="system@ai-arbitration.local",
+        original_name=contract_file.filename,
+        secure_name=secure_filename,
+        hash=file_hash
+    )
+    db.add(db_file)
+    db.commit()
+
+    # Simulate sending emails
+    print(f"\\n--- EMAIL SIMULATION ---")
+    print(f"To: {seller_email}")
+    print(f"Subject: Action Required: Contract Registered ({case_id})")
+    print(f"Link: http://localhost:8000/response?caseId={case_id}&party=Seller&action=accept&token={seller_token}\\n")
+    print(f"Wallet: http://localhost:8000/wallet?caseId={case_id}&party=Seller&token={seller_token}\\n")
+    
+    print(f"To: {buyer_email}")
+    print(f"Subject: Action Required: Contract Registered ({case_id})")
+    print(f"Link: http://localhost:8000/response?caseId={case_id}&party=Buyer&action=accept&token={buyer_token}\\n")
+    print(f"Wallet: http://localhost:8000/wallet?caseId={case_id}&party=Buyer&token={buyer_token}\\n")
+    print(f"------------------------\\n")
+
+    # Redirect to success page
+    return RedirectResponse(url=f"/success/{case_id}", status_code=303)
+
+@router.get("/success/{case_id}", response_class=HTMLResponse)
+async def success_page(request: Request, case_id: str, db: Session = Depends(get_db)):
+    """Renders the success confirmation page."""
+    case = db.query(Case).filter(Case.case_id == case_id).first()
+    if not case:
+        return HTMLResponse("Case not found", status_code=404)
+        
+    return templates.TemplateResponse("success.html", {"request": request, "case": case})
+
+@router.get("/response", response_class=HTMLResponse)
+async def signature_response(
+    request: Request, 
+    caseId: str, 
+    party: str, 
+    action: str, 
+    token: str, 
+    db: Session = Depends(get_db)
+):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case:
+        return HTMLResponse("Case not found", status_code=404)
+        
+    # Validate token
+    if party.lower() == "seller" and token != case.seller_token:
+        return HTMLResponse("Invalid token", status_code=403)
+    elif party.lower() == "buyer" and token != case.buyer_token:
+        return HTMLResponse("Invalid token", status_code=403)
+    elif party.lower() not in ["seller", "buyer"]:
+        return HTMLResponse("Invalid party", status_code=400)
+        
+    response_val = ResponseEnum.ACCEPT if action.lower() == "accept" else ResponseEnum.DECLINE
+    
+    if party.lower() == "seller":
+        case.seller_response = response_val
+    else:
+        case.buyer_response = response_val
+        
+    # Update Status
+    if case.seller_response == ResponseEnum.ACCEPT and case.buyer_response == ResponseEnum.ACCEPT:
+        case.status = StatusEnum.SIGNED
+    elif case.seller_response == ResponseEnum.DECLINE or case.buyer_response == ResponseEnum.DECLINE:
+        case.status = StatusEnum.DECLINED
+        
+    db.commit()
+    return templates.TemplateResponse("response_status.html", {"request": request, "case": case, "party": party})
+
+@router.get("/wallet", response_class=HTMLResponse)
+async def wallet_form(
+    request: Request, 
+    caseId: str, 
+    party: str, 
+    token: str, 
+    db: Session = Depends(get_db)
+):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case:
+        return HTMLResponse("Case not found", status_code=404)
+        
+    if party.lower() == "seller" and token != case.seller_token:
+        return HTMLResponse("Invalid token", status_code=403)
+    elif party.lower() == "buyer" and token != case.buyer_token:
+        return HTMLResponse("Invalid token", status_code=403)
+        
+    return templates.TemplateResponse("wallet_form.html", {"request": request, "case": case, "party": party, "token": token})
+
+@router.post("/wallet-submit", response_class=HTMLResponse)
+async def wallet_submit(
+    request: Request,
+    caseId: str = Form(...),
+    party: str = Form(...),
+    token: str = Form(...),
+    wallet_address: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case:
+        return HTMLResponse("Case not found", status_code=404)
+        
+    if party.lower() == "seller" and token != case.seller_token:
+        return HTMLResponse("Invalid token", status_code=403)
+    elif party.lower() == "buyer" and token != case.buyer_token:
+        return HTMLResponse("Invalid token", status_code=403)
+        
+    if party.lower() == "seller":
+        case.seller_wallet = wallet_address
+    else:
+        case.buyer_wallet = wallet_address
+        
+    db.commit()
+    return templates.TemplateResponse("response_status.html", {"request": request, "case": case, "party": party, "wallet_updated": True})

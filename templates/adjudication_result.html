@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+
+{% block title %}Final Determination | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 900px; padding: 3rem;">
+    <div style="text-align: center; border-bottom: 2px solid #2c3e50; margin-bottom: 2rem; padding-bottom: 1rem;">
+        <h1 style="color: #2c3e50; font-size: 28px; text-transform: uppercase;">Final Determination</h1>
+        <p><strong>Case #{{ case.case_id }}</strong> | <strong>Date Issued:</strong> {{ timestamp }}</p>
+    </div>
+
+    <!-- Magistrate Report Section -->
+    <h2 style="color: #2c3e50; font-size: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; margin-top: 2rem;">🔍 Magistrate Investigation Summary</h2>
+    <div style="background: rgba(255,255,255,0.5); padding: 1.5rem; border-radius: 8px; border: 1px solid #e5e7eb; margin: 1rem 0;">
+        <p><strong>Overview:</strong> {{ magistrate.summary }}</p>
+        
+        <h4 style="margin-top: 1rem; color: #1f2937;">Verified Facts:</h4>
+        <ul style="padding-left: 1.5rem; color: #4b5563;">
+            {% for fact in magistrate.facts %}
+            <li>{{ fact }}</li>
+            {% endfor %}
+        </ul>
+        
+        {% if magistrate.contradictions %}
+        <h4 style="margin-top: 1rem; color: #b91c1c;">Contradictions Found:</h4>
+        <ul style="padding-left: 1.5rem; color: #ef4444;">
+            {% for contradiction in magistrate.contradictions %}
+            <li>{{ contradiction }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+
+    <!-- Final Ruling Section -->
+    <h2 style="color: #2c3e50; font-size: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; margin-top: 3rem;">⚖️ Final Decision</h2>
+    <div style="background: rgba(44, 62, 80, 0.05); padding: 1.5rem; border-left: 4px solid #2c3e50; font-weight: 500; margin: 1rem 0; font-size: 1.1rem; line-height: 1.6;">
+        {{ ruling.decision }}
+    </div>
+
+    <h2 style="color: #2c3e50; font-size: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; margin-top: 3rem;">💰 Financial Awards</h2>
+    <div style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e5e7eb; margin: 1rem 0; display: flex; justify-content: space-between;">
+        <div style="text-align: center; flex: 1;">
+            <p style="text-transform: uppercase; font-size: 0.8rem; color: #6b7280; margin: 0;">Total Escrow</p>
+            <p style="font-size: 1.5rem; font-weight: bold; color: #1f2937; margin: 0;">{{ ruling.escrow_balance }} <span style="font-size: 0.9rem; color: #9ca3af;">Wei</span></p>
+        </div>
+        <div style="text-align: center; flex: 1; border-left: 1px solid #e5e7eb;">
+            <p style="text-transform: uppercase; font-size: 0.8rem; color: #6b7280; margin: 0;">Buyer Award</p>
+            <p style="font-size: 1.5rem; font-weight: bold; color: #10b981; margin: 0;">{{ ruling.buyer_award }} <span style="font-size: 0.9rem; color: #9ca3af;">Wei</span></p>
+        </div>
+        <div style="text-align: center; flex: 1; border-left: 1px solid #e5e7eb;">
+            <p style="text-transform: uppercase; font-size: 0.8rem; color: #6b7280; margin: 0;">Seller Award</p>
+            <p style="font-size: 1.5rem; font-weight: bold; color: #3b82f6; margin: 0;">{{ ruling.seller_award }} <span style="font-size: 0.9rem; color: #9ca3af;">Wei</span></p>
+        </div>
+    </div>
+
+    <h2 style="color: #2c3e50; font-size: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; margin-top: 3rem;">📝 Rationale</h2>
+    <div style="color: #4b5563; line-height: 1.7; margin-top: 1rem;">
+        {{ ruling.rationale | replace('\n', '<br>') | safe }}
+    </div>
+
+    <div style="margin-top: 4rem; font-size: 13px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 1.5rem; text-align: center;">
+        <p><em>AI Adjudicator Confidence Score: {{ (ruling.confidence * 100)|int }}%</em></p>
+        <p>This decision is binding and final, executed via smart contract.</p>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+
+{% block title %}Action Confirmed | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card success-card">
+    <div class="success-icon" style="background: rgba(39, 174, 96, 0.1); color: #27ae60;">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+    </div>
+    <h1>Action Confirmed</h1>
+    <div class="success-details">
+        <p>{{ action_message }}</p>
+    </div>
+
+    <div class="case-id-box" style="margin-top: 1rem;">
+        <span class="label">Case ID</span>
+        <span class="value">{{ case.case_id }}</span>
+    </div>
+    
+    <div class="case-id-box" style="margin-top: 1rem;">
+        <span class="label">Current Status</span>
+        <span class="value" style="color: #ef4444; font-weight: bold;">{{ case.status.value }}</span>
+    </div>
+</div>
+{% endblock %}

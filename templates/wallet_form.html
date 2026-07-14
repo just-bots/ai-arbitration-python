@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+
+{% block title %}Submit Wallet | AI Arbitration{% endblock %}
+
+{% block content %}
+<div class="glass-card">
+    <div class="card-header">
+        <h1>Submit Wallet Address</h1>
+        <p>Please provide your Ethereum wallet address to receive or deposit funds for Case <strong>{{ case.case_id }}</strong>.</p>
+    </div>
+
+    <form action="/wallet-submit" method="POST" class="modern-form">
+        <!-- Hidden Inputs for Security -->
+        <input type="hidden" name="caseId" value="{{ case.case_id }}">
+        <input type="hidden" name="party" value="{{ party }}">
+        <input type="hidden" name="token" value="{{ token }}">
+        
+        <div class="form-section">
+            <div class="form-grid">
+                <div class="input-group full-width">
+                    <label for="wallet_address">Ethereum Wallet Address (0x...)</label>
+                    <input type="text" id="wallet_address" name="wallet_address" required placeholder="0x1234567890abcdef1234567890abcdef12345678" pattern="^0x[a-fA-F0-9]{40}$" title="Must be a valid Ethereum address starting with 0x">
+                </div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn-primary">
+                <span>Save Wallet Address</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+                    <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+                    <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
+                </svg>
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
