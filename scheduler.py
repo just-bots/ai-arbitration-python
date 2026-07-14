@@ -5,6 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from database import SessionLocal
 from models import Case, StatusEnum
 import email_service
+from gmail_ingestion import process_inbound_emails
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "default_insecure_admin_key")
@@ -83,8 +84,12 @@ def check_transaction_timeouts():
         db.close()
 
 def start_scheduler():
-    scheduler = BackgroundScheduler(timezone=timezone.utc)
+    scheduler = BackgroundScheduler()
+    
+    # Run checks every 5 minutes
     scheduler.add_job(check_disputed_cases, 'interval', minutes=5)
     scheduler.add_job(check_transaction_timeouts, 'interval', minutes=5)
+    scheduler.add_job(process_inbound_emails, 'interval', minutes=5)
+    
     scheduler.start()
     return scheduler
