@@ -3,6 +3,7 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 from fastapi import APIRouter, Request, Form, UploadFile, File, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -32,37 +33,40 @@ async def create_case(
     request: Request,
     seller_name: str = Form(...),
     seller_email: str = Form(...),
-    seller_wallet: str = Form(...),
+    seller_wallet: str = Form(default=""),   # Optional at creation — submitted via wallet form later
     buyer_name: str = Form(...),
     buyer_email: str = Form(...),
-    buyer_wallet: str = Form(...),
-    escrow_fund_eth: float = Form(...),   # Required escrow in ETH (n8n: EscrowFundETH field)
-    contract_file: UploadFile = File(...),
+    buyer_wallet: str = Form(default=""),    # Optional at creation — submitted via wallet form later
+    escrow_fund_eth: float = Form(...),      # Required — n8n: EscrowFundETH field
+    contract_text: str = Form(...),          # Required — full contract text for AI adjudication
+    contract_file: Optional[UploadFile] = File(default=None),  # Optional PDF attachment
     db: Session = Depends(get_db)
 ):
-    """Handles the form submission, saves the file, and inserts into DB."""
+    """Handles the form submission, saves the file (if any), and inserts into DB."""
 
-    # n8n: EscrowFund = EscrowFundETH * 1e18 (stored as Wei integer)
-    # n8n: Fee = $vars.PROCESSING_FEE (platform constant, not user-supplied)
     escrow_fund_wei = int(escrow_fund_eth * 1e18)
     fee_wei         = PROCESSING_FEE
+
     # 1. Generate IDs and Tokens
-    case_id = f"CASE-{secrets.token_hex(4).upper()}"
+    case_id      = f"CASE-{secrets.token_hex(4).upper()}"
     seller_token = secrets.token_urlsafe(16)
-    buyer_token = secrets.token_urlsafe(16)
-    
-    # 2. Save the uploaded file securely and calculate hash
-    secure_filename = f"{uuid.uuid4()}_{contract_file.filename}"
-    file_path = os.path.join(UPLOAD_DIR, secure_filename)
-    
-    file_content = await contract_file.read()
-    file_hash = hashlib.sha256(file_content).hexdigest()
-    
-    with open(file_path, "wb") as f:
-        f.write(file_content)
-        
-    now = datetime.now(timezone.utc)
-    
+    buyer_token  = secrets.token_urlsafe(16)
+    now          = datetime.now(timezone.utc)
+
+    # 2. Save uploaded file (if provided)
+    secure_filename = None
+    file_hash       = None
+    original_name   = None
+
+    if contract_file and contract_file.filename:
+        file_content    = await contract_file.read()
+        file_hash       = hashlib.sha256(file_content).hexdigest()
+        original_name   = contract_file.filename
+        secure_filename = f"{uuid.uuid4()}_{original_name}"
+        file_path       = os.path.join(UPLOAD_DIR, secure_filename)
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+
     # 3. Create Case Record
     new_case = Case(
         case_id=case_id,
@@ -73,8 +77,8 @@ async def create_case(
         buyer_email=buyer_email,
         seller_token=seller_token,
         buyer_token=buyer_token,
-        seller_wallet=seller_wallet,
-        buyer_wallet=buyer_wallet,
+        seller_wallet=seller_wallet or None,
+        buyer_wallet=buyer_wallet or None,
         # Financials in Wei (n8n: EscrowFund in wei, Fee = $vars.PROCESSING_FEE in wei)
         escrow_fund=escrow_fund_wei,
         fee=fee_wei,
@@ -90,33 +94,34 @@ async def create_case(
     db.commit()
     db.refresh(new_case)
     
-    # 4. Create Initial Setup Message
+    # 4. Create Initial Setup Message — stores contract text for AI adjudication
     setup_message = Message(
         case_id=case_id,
         time=now,
         sender=RoleEnum.SYSTEM,
         email="system@ai-arbitration.local",
-        content=f"Case created. Contract {contract_file.filename} uploaded.",
+        content=f"CONTRACT TEXT:\n\n{contract_text}",
         label=LabelEnum.SETUP
     )
     db.add(setup_message)
     db.commit()
     db.refresh(setup_message)
-    
-    # 5. Create File Record linked to Case and Message
-    db_file = DBFile(
-        file_id=str(uuid.uuid4()),
-        case_id=case_id,
-        message_id=setup_message.id,
-        time=now,
-        submitter=RoleEnum.SYSTEM,
-        email="system@ai-arbitration.local",
-        original_name=contract_file.filename,
-        secure_name=secure_filename,
-        hash=file_hash
-    )
-    db.add(db_file)
-    db.commit()
+
+    # 5. Create File Record (only if a file was uploaded)
+    if secure_filename:
+        db_file = DBFile(
+            file_id=str(uuid.uuid4()),
+            case_id=case_id,
+            message_id=setup_message.id,
+            time=now,
+            submitter=RoleEnum.SYSTEM,
+            email="system@ai-arbitration.local",
+            original_name=original_name,
+            secure_name=secure_filename,
+            hash=file_hash
+        )
+        db.add(db_file)
+        db.commit()
 
     # Simulate sending emails
     print(f"\\n--- EMAIL SIMULATION ---")

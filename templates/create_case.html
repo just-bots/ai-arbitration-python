@@ -6,76 +6,222 @@
 <div class="glass-card">
     <div class="card-header">
         <h1>Register Contract</h1>
-        <p>Initialize a new AI arbitration case by uploading the signed agreement and participant details.</p>
+        <p>Initialize a new AI arbitration case by providing participant details, the contract text, and an optional PDF upload.</p>
     </div>
 
-    <form action="/create-case" method="POST" enctype="multipart/form-data" class="modern-form">
-        
+    <form action="/create-case" method="POST" enctype="multipart/form-data" class="modern-form" id="create-case-form">
+
+        <!-- ── Section 1: Seller ── -->
         <div class="form-section">
             <div class="section-badge">1</div>
             <h2>Seller Details</h2>
             <div class="form-grid">
                 <div class="input-group">
-                    <label for="seller_name">Full Name</label>
+                    <label for="seller_name">Full Name <span class="required-star">*</span></label>
                     <input type="text" id="seller_name" name="seller_name" required placeholder="e.g. Acme Corp">
                 </div>
                 <div class="input-group">
-                    <label for="seller_email">Email Address</label>
+                    <label for="seller_email">Email Address <span class="required-star">*</span></label>
                     <input type="email" id="seller_email" name="seller_email" required placeholder="seller@example.com">
                 </div>
                 <div class="input-group full-width">
-                    <label for="seller_wallet">Crypto Wallet Address (Optional)</label>
-                    <input type="text" id="seller_wallet" name="seller_wallet" placeholder="0x...">
+                    <label for="seller_wallet">Ethereum Wallet Address <span class="field-hint">(optional — can be submitted later)</span></label>
+                    <input type="text" id="seller_wallet" name="seller_wallet" placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$" title="Must be a valid Ethereum address starting with 0x">
                 </div>
             </div>
         </div>
 
+        <!-- ── Section 2: Buyer ── -->
         <div class="form-section">
             <div class="section-badge">2</div>
             <h2>Buyer Details</h2>
             <div class="form-grid">
                 <div class="input-group">
-                    <label for="buyer_name">Full Name</label>
+                    <label for="buyer_name">Full Name <span class="required-star">*</span></label>
                     <input type="text" id="buyer_name" name="buyer_name" required placeholder="e.g. John Doe">
                 </div>
                 <div class="input-group">
-                    <label for="buyer_email">Email Address</label>
+                    <label for="buyer_email">Email Address <span class="required-star">*</span></label>
                     <input type="email" id="buyer_email" name="buyer_email" required placeholder="buyer@example.com">
                 </div>
                 <div class="input-group full-width">
-                    <label for="buyer_wallet">Crypto Wallet Address (Optional)</label>
-                    <input type="text" id="buyer_wallet" name="buyer_wallet" placeholder="0x...">
+                    <label for="buyer_wallet">Ethereum Wallet Address <span class="field-hint">(optional — can be submitted later)</span></label>
+                    <input type="text" id="buyer_wallet" name="buyer_wallet" placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$" title="Must be a valid Ethereum address starting with 0x">
                 </div>
             </div>
         </div>
 
+        <!-- ── Section 3: Contract ── -->
         <div class="form-section">
             <div class="section-badge">3</div>
-            <h2>Contract Upload</h2>
-            <div class="upload-container">
-                <div class="upload-icon">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
+            <h2>Contract Details</h2>
+
+            <!-- Escrow amount -->
+            <div class="form-grid" style="margin-bottom: 1.5rem;">
+                <div class="input-group">
+                    <label for="escrow_fund_eth">Required Escrow Amount (ETH) <span class="required-star">*</span></label>
+                    <input type="number" id="escrow_fund_eth" name="escrow_fund_eth" required
+                           placeholder="e.g. 0.5" step="0.0001" min="0.0001"
+                           style="font-size: 1.1rem;">
                 </div>
-                <label for="contract_file" class="upload-label">
-                    <span>Choose a PDF file</span> or drag it here
-                </label>
-                <input type="file" id="contract_file" name="contract_file" accept="application/pdf" required class="file-input">
+                <div class="input-group" style="align-self: end;">
+                    <div class="info-pill">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        The Buyer must deposit this amount into escrow before work begins.
+                        A platform processing fee of 0.001 ETH is added automatically.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contract text -->
+            <div class="input-group full-width" style="margin-bottom: 1.5rem;">
+                <label for="contract_text">Contract Text <span class="required-star">*</span></label>
+                <textarea id="contract_text" name="contract_text" required rows="10"
+                          placeholder="Paste or type the full text of the contract here. Include all agreed terms, deliverables, deadlines, and conditions. This text will be used by the AI during adjudication."></textarea>
+            </div>
+
+            <!-- PDF upload -->
+            <div class="input-group full-width">
+                <label>Contract PDF <span class="field-hint">(optional — upload a signed PDF copy)</span></label>
+                <div class="upload-container" id="upload-container">
+                    <div class="upload-icon">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                    </div>
+                    <div class="upload-text">
+                        <span class="upload-prompt">Click to upload</span> or drag and drop
+                    </div>
+                    <div class="upload-hint">PDF, DOC, DOCX, TXT — max 20 MB</div>
+                    <div class="upload-filename" id="upload-filename" style="display:none;"></div>
+                    <input type="file" id="contract_file" name="contract_file"
+                           accept=".pdf,.doc,.docx,.txt,application/pdf,text/plain"
+                           class="file-input-hidden">
+                </div>
             </div>
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="btn-primary">
+            <button type="submit" class="btn-primary" id="submit-btn">
                 <span>Create Arbitration Case</span>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                    <polyline points="12 5 19 12 12 19"/>
                 </svg>
             </button>
         </div>
     </form>
 </div>
+
+<style>
+.required-star { color: #f87171; margin-left: 2px; }
+.field-hint    { color: #94a3b8; font-size: 0.8rem; font-weight: 400; margin-left: 6px; }
+
+textarea {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    color: #f1f5f9;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    padding: 14px 16px;
+    resize: vertical;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+textarea:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+}
+textarea::placeholder { color: #475569; }
+
+.upload-container {
+    border: 2px dashed rgba(99,102,241,0.35);
+    border-radius: 12px;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    background: rgba(99,102,241,0.04);
+}
+.upload-container:hover,
+.upload-container.drag-over {
+    border-color: #6366f1;
+    background: rgba(99,102,241,0.09);
+}
+.upload-container.has-file {
+    border-color: #34d399;
+    background: rgba(52,211,153,0.06);
+}
+.upload-icon { margin-bottom: 0.75rem; color: #6366f1; }
+.upload-text { font-size: 0.95rem; color: #cbd5e1; margin-bottom: 0.25rem; }
+.upload-prompt { color: #818cf8; font-weight: 600; }
+.upload-hint { font-size: 0.8rem; color: #64748b; }
+.upload-filename {
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: #34d399;
+    font-weight: 500;
+}
+.file-input-hidden {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+}
+.info-pill {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    line-height: 1.5;
+}
+.info-pill svg { flex-shrink: 0; margin-top: 2px; color: #818cf8; }
+</style>
+
+<script>
+const container = document.getElementById('upload-container');
+const fileInput  = document.getElementById('contract_file');
+const filename   = document.getElementById('upload-filename');
+
+fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+        filename.textContent = '✓ ' + fileInput.files[0].name;
+        filename.style.display = 'block';
+        container.classList.add('has-file');
+    }
+});
+
+container.addEventListener('dragover', (e) => { e.preventDefault(); container.classList.add('drag-over'); });
+container.addEventListener('dragleave', ()  => container.classList.remove('drag-over'));
+container.addEventListener('drop', (e) => {
+    e.preventDefault();
+    container.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) {
+        fileInput.files = e.dataTransfer.files;
+        filename.textContent = '✓ ' + e.dataTransfer.files[0].name;
+        filename.style.display = 'block';
+        container.classList.add('has-file');
+    }
+});
+
+// Prevent double-submit
+document.getElementById('create-case-form').addEventListener('submit', () => {
+    document.getElementById('submit-btn').disabled = true;
+    document.getElementById('submit-btn').querySelector('span').textContent = 'Creating case…';
+});
+</script>
 {% endblock %}
