@@ -92,10 +92,13 @@ Each phase maps to one of the five workflow modules:
 
 **Key design choices:**
 - **PostgreSQL** via Docker replaces Google Sheets as the case ledger
-- **Local `storage/evidence/`** replaces Google Drive for file uploads
-- **LangChain + OpenAI** powers the two-stage AI adjudication
-- **Blockchain calls are mocked** for local dev (print-simulated); real Etherscan/Tatum integration is ready via env vars
-- **Email is simulated** via console output; swap in SMTP or SendGrid for production
+- **Local `uploads/`** replaces Google Drive for file uploads
+- **LangChain + OpenAI / Gemini / DeepSeek** powers the two-stage AI adjudication, complete with `with_fallbacks()` logic for multi-provider resilience.
+- **Agentic Evidence Tooling**: The AI Magistrate runs as a LangChain ReAct agent equipped with a `read_evidence_file` tool to directly parse PDF/TXT evidence.
+- **Gmail IMAP Ingestion**: A built-in IMAP client automatically polls for email replies, extracts Case IDs, hashes attachments, and saves them to the case ledger.
+- **APScheduler**: Manages automated cron jobs for timeouts, evidence window expirations, and Gmail polling.
+- **Blockchain verified**: Actual Etherscan API validation replaces mock deposits.
+- **Email is sent via SMTP**: Powered by `email_service.py` using standard SMTP credentials.
 
 ---
 
