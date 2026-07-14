@@ -7,8 +7,10 @@ import os
 
 from database import get_db
 from models import Case, StatusEnum, Message, RoleEnum, LabelEnum
+from dependencies import verify_admin_token
 import email_service
 import os
+import secrets
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 BASE_URL    = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
@@ -31,9 +33,9 @@ async def appeal_form(request: Request, caseId: str, token: str, db: Session = D
         
     # Check token to determine party
     party = None
-    if token == case.buyer_token:
+    if secrets.compare_digest(token, case.buyer_token):
         party = "Buyer"
-    elif token == case.seller_token:
+    elif secrets.compare_digest(token, case.seller_token):
         party = "Seller"
     else:
         return HTMLResponse("Invalid secure token.", status_code=403)
@@ -70,7 +72,7 @@ async def submit_appeal(
     if case.status != StatusEnum.DECIDED_LOCKED:
         return HTMLResponse("Case is not in DECIDED_LOCKED state.", status_code=400)
         
-    party = RoleEnum.BUYER if token == case.buyer_token else RoleEnum.SELLER
+    party = RoleEnum.BUYER if secrets.compare_digest(token, case.buyer_token) else RoleEnum.SELLER
     email = case.buyer_email if party == RoleEnum.BUYER else case.seller_email
     
     # Save the objection
@@ -107,7 +109,7 @@ async def submit_appeal(
     """)
 
 @router.get("/review", response_class=HTMLResponse)
-async def review_dashboard(request: Request, caseId: str, db: Session = Depends(get_db)):
+async def review_dashboard(request: Request, caseId: str, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     """Admin dashboard to review an objection."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
@@ -123,7 +125,7 @@ async def review_dashboard(request: Request, caseId: str, db: Session = Depends(
     })
 
 @router.post("/review", response_class=HTMLResponse)
-async def process_review(request: Request, caseId: str = Form(...), action: str = Form(...), db: Session = Depends(get_db)):
+async def process_review(request: Request, caseId: str = Form(...), action: str = Form(...), db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     """Processes the Admin's decision (Uphold or Reverse)."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:

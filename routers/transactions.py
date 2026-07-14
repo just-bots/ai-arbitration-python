@@ -5,6 +5,11 @@ from sqlalchemy.orm import Session
 from decimal import Decimal
 from datetime import datetime, timezone
 import secrets
+import httpx
+import os
+
+ETHERSCAN_API_KEY = os.environ.get("ETHERSCAN_API_KEY", "")
+ESCROW_WALLET = os.environ.get("ESCROW_WALLET", "0x0000000000000000000000000000000000000000")
 
 from database import get_db
 from models import Case, StatusEnum, RoleEnum, Message, LabelEnum
@@ -22,10 +27,34 @@ async def verify_deposit(request: Request, caseId: str, db: Session = Depends(ge
         
     total_required = (case.escrow_fund or Decimal(0)) + (case.fee or Decimal(0))
     
-    # Mocking the Etherscan deposit for local testing purposes
-    # We pretend the exact amount was just deposited.
-    if case.deposited_fund is None or case.deposited_fund < total_required:
-        case.deposited_fund = total_required
+    # Use Etherscan if API key is provided
+    was_funded_already = case.deposited_fund is not None and case.deposited_fund >= total_required
+
+    if ETHERSCAN_API_KEY and case.buyer_wallet and not was_funded_already:
+        try:
+            url = f"https://api.etherscan.io/api?module=account&action=txlist&address={ESCROW_WALLET}&startblock=0&endblock=99999999&sort=asc&apikey={ETHERSCAN_API_KEY}"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url)
+                data = resp.json()
+                if data.get("status") == "1":
+                    total_deposited = Decimal(0)
+                    for tx in data.get("result", []):
+                        # Match buyer to escrow deposits
+                        if tx.get("from", "").lower() == case.buyer_wallet.lower() and tx.get("to", "").lower() == ESCROW_WALLET.lower():
+                            total_deposited += Decimal(tx.get("value", "0"))
+                    case.deposited_fund = total_deposited
+        except Exception as e:
+            print(f"Etherscan error: {e}")
+            # Fall back to existing amount on error
+            if case.deposited_fund is None:
+                case.deposited_fund = Decimal(0)
+    elif not was_funded_already:
+        # Mocking the Etherscan deposit for local testing purposes if no API key
+        if case.deposited_fund is None or case.deposited_fund < total_required:
+            case.deposited_fund = total_required
+
+    # Check state transitions
+    if case.deposited_fund >= total_required and not was_funded_already:
         if case.status == StatusEnum.SIGNED:
             case.status = StatusEnum.EFFECTIVE
         db.commit()
@@ -60,8 +89,8 @@ async def transaction_action(
         return HTMLResponse("Case not found", status_code=404)
         
     # Validate tokens
-    is_buyer = (token == case.buyer_token)
-    is_seller = (token == case.seller_token)
+    is_buyer = secrets.compare_digest(token, case.buyer_token)
+    is_seller = secrets.compare_digest(token, case.seller_token)
     
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)

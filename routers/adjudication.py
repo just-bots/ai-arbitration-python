@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from database import get_db
 from models import Case, StatusEnum, Message, File
+from dependencies import verify_admin_token
 import email_service
 
 # Pydantic models for LangChain structured output
@@ -47,7 +48,7 @@ def read_evidence_files(case_id: str, db: Session):
     return file_table
 
 @router.post("/run", response_class=HTMLResponse)
-async def run_adjudication(request: Request, caseId: str = Form(...), db: Session = Depends(get_db)):
+async def run_adjudication(request: Request, caseId: str = Form(...), db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     """Executes the two-stage AI adjudication process."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:

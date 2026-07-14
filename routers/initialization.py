@@ -180,9 +180,9 @@ async def signature_confirm(
         
     # Validate token
     party_lower = party.lower()
-    if party_lower == "seller" and token != case.seller_token:
+    if party_lower == "seller" and not secrets.compare_digest(token, case.seller_token):
         return HTMLResponse("Invalid token", status_code=403)
-    elif party_lower == "buyer" and token != case.buyer_token:
+    elif party_lower == "buyer" and not secrets.compare_digest(token, case.buyer_token):
         return HTMLResponse("Invalid token", status_code=403)
     elif party_lower not in ["seller", "buyer"]:
         return HTMLResponse("Invalid party", status_code=400)
@@ -220,9 +220,9 @@ async def signature_submit(
         
     # Validate token
     party_lower = party.lower()
-    if party_lower == "seller" and token != case.seller_token:
+    if party_lower == "seller" and not secrets.compare_digest(token, case.seller_token):
         return HTMLResponse("Invalid token", status_code=403)
-    elif party_lower == "buyer" and token != case.buyer_token:
+    elif party_lower == "buyer" and not secrets.compare_digest(token, case.buyer_token):
         return HTMLResponse("Invalid token", status_code=403)
     elif party_lower not in ["seller", "buyer"]:
         return HTMLResponse("Invalid party", status_code=400)

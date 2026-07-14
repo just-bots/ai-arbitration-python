@@ -35,6 +35,7 @@
         <h3>Admin Tools</h3>
         <form action="/prosecution/escalate" method="POST">
             <input type="hidden" name="caseId" value="{{ case.case_id }}">
+            <input type="hidden" name="token" value="{{ token }}">
             <button type="submit" class="btn" style="background: #ef4444; color: white;">Force Escalate to Adjudication (Simulate Deadline)</button>
         </form>
     </div>

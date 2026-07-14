@@ -7,6 +7,7 @@ import hashlib
 import uuid
 import os
 import shutil
+import secrets
 
 from database import get_db
 from models import Case, StatusEnum, RoleEnum, Message, LabelEnum, File
@@ -25,8 +26,8 @@ async def get_evidence_form(request: Request, caseId: str, token: str, db: Sessi
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    is_buyer = (token == case.buyer_token)
-    is_seller = (token == case.seller_token)
+    is_buyer = secrets.compare_digest(token, case.buyer_token)
+    is_seller = secrets.compare_digest(token, case.seller_token)
     
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
@@ -54,8 +55,8 @@ async def post_evidence(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    is_buyer = (token == case.buyer_token)
-    is_seller = (token == case.seller_token)
+    is_buyer = secrets.compare_digest(token, case.buyer_token)
+    is_seller = secrets.compare_digest(token, case.seller_token)
     
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
@@ -125,6 +126,7 @@ async def post_evidence(
 async def escalate_to_adjudication(
     request: Request,
     caseId: str = Form(...),
+    token: str = Form(...),
     db: Session = Depends(get_db)
 ):
     """Ends the Prosecution phase and moves case to DISPUTED status.
@@ -139,6 +141,9 @@ async def escalate_to_adjudication(
 
     if case.status not in [StatusEnum.PENDING, StatusEnum.SIGNED, StatusEnum.EFFECTIVE]:
         return HTMLResponse(f"Cannot escalate. Case is currently in {case.status.value} status.", status_code=400)
+
+    if not (secrets.compare_digest(token, case.buyer_token) or secrets.compare_digest(token, case.seller_token)):
+        return HTMLResponse("Unauthorized token.", status_code=403)
 
     # Matches n8n "Record Dispute1" node: Status=DISPUTED, Dispute Time=now
     case.status = StatusEnum.DISPUTED
