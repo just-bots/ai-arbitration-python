@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from database import get_db
 from models import Case, StatusEnum, Message, File
+import email_service
 
 # Pydantic models for LangChain structured output
 class MagistrateReport(BaseModel):
@@ -218,9 +219,19 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     case.decision = final_ruling.decision
     case.buyer_award = buyer_award_int
     case.seller_award = seller_award_int
-    
+
     db.commit()
-    
+
+    # Send determination emails to both parties
+    email_service.send_determination(
+        case_id=case.case_id,
+        seller_name=case.seller, seller_email=case.seller_email, seller_token=case.seller_token,
+        buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_token=case.buyer_token,
+        decision=final_ruling.decision,
+        seller_award_eth=seller_award_int / 1e18,
+        buyer_award_eth=buyer_award_int  / 1e18,
+    )
+
     return templates.TemplateResponse("adjudication_result.html", {
         "request": request,
         "case": case,

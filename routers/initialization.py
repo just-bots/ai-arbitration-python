@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Case, Message, File as DBFile, StatusEnum, LabelEnum, RoleEnum, ResponseEnum
+import email_service
 
 # Platform constants from environment (mirrors n8n $vars)
 ESCROW_WALLET    = os.environ.get("ESCROW_WALLET", "0x0000000000000000000000000000000000000000")
@@ -123,18 +124,20 @@ async def create_case(
         db.add(db_file)
         db.commit()
 
-    # Simulate sending emails
-    print(f"\\n--- EMAIL SIMULATION ---")
-    print(f"To: {seller_email}")
-    print(f"Subject: Action Required: Contract Registered ({case_id})")
-    print(f"Link: http://localhost:8000/response?caseId={case_id}&party=Seller&action=accept&token={seller_token}\\n")
-    print(f"Wallet: http://localhost:8000/wallet?caseId={case_id}&party=Seller&token={seller_token}\\n")
-    
-    print(f"To: {buyer_email}")
-    print(f"Subject: Action Required: Contract Registered ({case_id})")
-    print(f"Link: http://localhost:8000/response?caseId={case_id}&party=Buyer&action=accept&token={buyer_token}\\n")
-    print(f"Wallet: http://localhost:8000/wallet?caseId={case_id}&party=Buyer&token={buyer_token}\\n")
-    print(f"------------------------\\n")
+    # 6. Send registration emails to both parties
+    escrow_eth   = escrow_fund_eth
+    preview_text = contract_text
+
+    email_service.send_case_registered(
+        case_id=case_id, party="Seller", name=seller_name, email=seller_email,
+        token=seller_token, counterpart_name=buyer_name,
+        escrow_eth=escrow_eth, contract_text_preview=preview_text
+    )
+    email_service.send_case_registered(
+        case_id=case_id, party="Buyer", name=buyer_name, email=buyer_email,
+        token=buyer_token, counterpart_name=seller_name,
+        escrow_eth=escrow_eth, contract_text_preview=preview_text
+    )
 
     # Redirect to success page
     return RedirectResponse(url=f"/success/{case_id}", status_code=303)
@@ -183,6 +186,26 @@ async def signature_response(
         case.status = StatusEnum.DECLINED
         
     db.commit()
+
+    # Send status emails
+    if case.status == StatusEnum.SIGNED:
+        from decimal import Decimal
+        total_eth = float((case.escrow_fund or Decimal(0)) + (case.fee or Decimal(0))) / 1e18
+        escrow_eth = float(case.escrow_fund or Decimal(0)) / 1e18
+        email_service.send_contract_signed(
+            case_id=case.case_id,
+            seller_name=case.seller, seller_email=case.seller_email,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email,
+            escrow_address=case.escrow_address or "(not set)",
+            escrow_eth=escrow_eth, total_eth=total_eth
+        )
+    elif case.status == StatusEnum.DECLINED:
+        email_service.send_contract_declined(
+            case_id=case.case_id, declining_party=party,
+            seller_name=case.seller, seller_email=case.seller_email,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email
+        )
+
     return templates.TemplateResponse("response_status.html", {"request": request, "case": case, "party": party})
 
 @router.get("/wallet", response_class=HTMLResponse)
@@ -226,6 +249,15 @@ async def wallet_submit(
         case.seller_wallet = wallet_address
     else:
         case.buyer_wallet = wallet_address
-        
+
     db.commit()
-    return templates.TemplateResponse("response_status.html", {"request": request, "case": case, "party": party, "wallet_updated": True})
+
+    # Confirm wallet registration via email
+    name  = case.seller if party.lower() == "seller" else case.buyer
+    email = case.seller_email if party.lower() == "seller" else case.buyer_email
+    email_service.send_wallet_confirmed(
+        case_id=caseId, party=party, name=name, email=email, wallet=wallet_address
+    )
+
+    return templates.TemplateResponse("response_status.html",
+        {"request": request, "case": case, "party": party, "wallet_updated": True})

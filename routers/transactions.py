@@ -8,6 +8,7 @@ import secrets
 
 from database import get_db
 from models import Case, StatusEnum, RoleEnum, Message, LabelEnum
+import email_service
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 templates = Jinja2Templates(directory="templates")
@@ -26,16 +27,13 @@ async def verify_deposit(request: Request, caseId: str, db: Session = Depends(ge
     if case.deposited_fund is None or case.deposited_fund < total_required:
         case.deposited_fund = total_required
         db.commit()
-        
-        # Simulate emails to Buyer and Seller about Funding Confirmed
-        print(f"\\n--- EMAIL SIMULATION: FUNDING CONFIRMED ---")
-        print(f"To: {case.seller_email} (Seller)")
-        print(f"Message: The required escrow fund is now deposited.")
-        print(f"Action: Release Payment -> http://localhost:8000/transactions/action?caseId={caseId}&token={case.buyer_token}&actionType=release_payment")
-        print(f"\\nTo: {case.buyer_email} (Buyer)")
-        print(f"Message: The required payment has been successfully processed.")
-        print(f"Action: Request Refund -> http://localhost:8000/transactions/action?caseId={caseId}&token={case.buyer_token}&actionType=request_refund")
-        print(f"-------------------------------------------\\n")
+
+        # Send funding confirmed emails
+        email_service.send_escrow_confirmed(
+            case_id=caseId,
+            seller_name=case.seller, seller_email=case.seller_email, seller_token=case.seller_token,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_token=case.buyer_token
+        )
 
     is_funded = case.deposited_fund >= total_required
 
@@ -101,11 +99,18 @@ async def transaction_action(
         if new_payment_total >= escrow_fund:
             case.status = StatusEnum.CLOSED
 
-        action_message = f"Payment of {remittance / 1e18:.4f} ETH successfully released to the Seller."
+        action_message = f"Payment of {remittance / 1e18:.6f} ETH successfully released to the Seller."
         if case.status == StatusEnum.CLOSED:
             action_message += " The case is now CLOSED."
 
-    elif actionType == "request_refund":
+        db.commit()
+        email_service.send_payment_released(
+            case_id=case.case_id,
+            seller_name=case.seller, seller_email=case.seller_email,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email,
+            amount_eth=remittance / 1e18,
+            closed=(case.status == StatusEnum.CLOSED)
+        )
         # Only the Buyer can request a refund
         if not is_buyer:
             return HTMLResponse("Only the buyer can request a refund", status_code=403)
@@ -126,12 +131,18 @@ async def transaction_action(
             label=LabelEnum.DISPUTE
         )
         db.add(dispute_msg)
+        db.commit()
+        email_service.send_refund_requested(
+            case_id=case.case_id,
+            seller_name=case.seller, seller_email=case.seller_email,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email
+        )
 
     else:
         return HTMLResponse("Unknown action", status_code=400)
         
     db.commit()
-    
+
     return templates.TemplateResponse("transaction_action.html", {
         "request": request,
         "case": case,

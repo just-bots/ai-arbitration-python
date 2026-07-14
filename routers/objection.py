@@ -7,6 +7,11 @@ import os
 
 from database import get_db
 from models import Case, StatusEnum, Message, RoleEnum, LabelEnum
+import email_service
+import os
+
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
+BASE_URL    = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 
 router = APIRouter(prefix="/objection", tags=["Objection"])
 templates = Jinja2Templates(directory="templates")
@@ -79,14 +84,23 @@ async def submit_appeal(
     )
     db.add(msg)
     
-    # Update case status to UNDER_REVIEW (n8n: Record Appeal — Status="UNDER REVIEW: Locked")
-    case.status = StatusEnum.DECIDED  # closest available; UNDER_REVIEW not in enum — mark DECIDED pending review
+    # Update case status pending admin review
+    case.status = StatusEnum.DECIDED  # closest available; stays DECIDED pending HITL review
     case.appeal_time = datetime.now(timezone.utc)
     db.commit()
-    
+
+    # Notify admin that a review is required
+    objecting_name = case.buyer if party == RoleEnum.BUYER else case.seller
+    review_url = f"{BASE_URL}/objection/review?caseId={caseId}"
+    if ADMIN_EMAIL:
+        email_service.send_objection_received(
+            case_id=caseId, objecting_party=objecting_name,
+            admin_email=ADMIN_EMAIL, review_url=review_url
+        )
+
     return HTMLResponse("""
     <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-        <h1 style="color: #27AE60;">✓ Objection Filed</h1>
+        <h1 style="color: #27AE60;">&#x2713; Objection Filed</h1>
         <p>Your procedural objection has been successfully submitted for Human Review.</p>
         <p>You will be notified once a determination is reached.</p>
     </div>
@@ -116,17 +130,21 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
         return HTMLResponse("Case not found", status_code=404)
         
     if action == "uphold":
-        # n8n Uphold Determination: re-lock to DECIDED so the hourly distribution cron processes it
-        # Do NOT set CLOSED here — the distribution workflow handles CLOSED after blockchain transfer
         case.status = StatusEnum.DECIDED
-        # NOTE: seller_payout / buyer_payout are set by the distribution step (Objection scheduler)
-        # so we do NOT write them here either
         db.commit()
+
+        # Notify both parties the ruling stands and distribute awards
+        seller_award_eth = float(case.seller_award or 0) / 1e18
+        buyer_award_eth  = float(case.buyer_award  or 0) / 1e18
+        email_service.send_award_distributed(
+            case_id=caseId,
+            seller_name=case.seller, seller_email=case.seller_email, seller_award_eth=seller_award_eth,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_award_eth=buyer_award_eth
+        )
         return HTMLResponse("""
         <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-            <h1 style="color: #27AE60;">✓ Ruling Upheld</h1>
-            <p>The AI's original ruling has been confirmed.</p>
-            <p>Status changed to CLOSED. Funds have been distributed via simulated smart contract execution.</p>
+            <h1 style="color: #27AE60;">&#x2713; Ruling Upheld</h1>
+            <p>The AI's original ruling has been confirmed. Award distribution emails sent.</p>
         </div>
         """)
     elif action == "reverse":
