@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirm Contract Response - AI Arbitration</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background-color: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            max-width: 800px;
+            width: 100%;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .contract-text {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 30px;
+        }
+        .action-banner {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .action-banner.accept {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+        .action-banner.decline {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            text-align: center;
+            transition: opacity 0.2s;
+        }
+        .btn:hover {
+            opacity: 0.9;
+        }
+        .btn-accept {
+            background-color: #2e7d32;
+            color: white;
+        }
+        .btn-decline {
+            background-color: #c62828;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Review Contract Terms</h1>
+        
+        <p>You are about to <strong>{{ action.upper() }}</strong> the following contract as the <strong>{{ party.title() }}</strong>.</p>
+        
+        <div class="contract-text">
+{{ case.contract_text }}
+        </div>
+
+        <div class="action-banner {{ action }}">
+            {% if action == 'accept' %}
+                You are agreeing to the terms stipulated above. The contract will become binding once both parties sign.
+            {% else %}
+                You are declining the terms stipulated above. This will terminate the contract process.
+            {% endif %}
+        </div>
+
+        <form action="/response-submit" method="POST">
+            <input type="hidden" name="caseId" value="{{ case.case_id }}">
+            <input type="hidden" name="party" value="{{ party }}">
+            <input type="hidden" name="action" value="{{ action }}">
+            <input type="hidden" name="token" value="{{ token }}">
+            
+            <button type="submit" class="btn btn-{{ action }}">
+                Confirm {{ action.title() }}
+            </button>
+        </form>
+    </div>
+</body>
+</html>

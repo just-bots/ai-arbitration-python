@@ -55,7 +55,7 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
 
     # LOCK the case immediately before running agents (n8n: Record Status node fires in parallel
     # at the same time as Get Messages / Get Files — before Prepare Case Packet)
-    case.status = StatusEnum.PROCESSING
+    case.status = StatusEnum.PROCESSING_LOCKED
     case.adjudication_time = datetime.now(timezone.utc)
     db.commit()
     db.refresh(case)
@@ -214,7 +214,7 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     # Commit final ruling to DB (n8n: Record Determination node)
     # Status becomes DECIDED, Determination Time recorded
     # NOTE: adjudication_time was already set above when the case was locked
-    case.status = StatusEnum.DECIDED
+    case.status = StatusEnum.DECIDED_LOCKED
     case.determination_time = datetime.now(timezone.utc)
     case.decision = final_ruling.decision
     case.buyer_award = buyer_award_int

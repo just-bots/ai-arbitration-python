@@ -26,6 +26,8 @@ async def verify_deposit(request: Request, caseId: str, db: Session = Depends(ge
     # We pretend the exact amount was just deposited.
     if case.deposited_fund is None or case.deposited_fund < total_required:
         case.deposited_fund = total_required
+        if case.status == StatusEnum.SIGNED:
+            case.status = StatusEnum.EFFECTIVE
         db.commit()
 
         # Send funding confirmed emails
@@ -67,6 +69,9 @@ async def transaction_action(
     action_message = ""
     
     if actionType == "release_payment":
+        if case.status in [StatusEnum.TRANSFERRED_TO_SELLER, StatusEnum.CLOSED]:
+            return HTMLResponse("Payment has already been released.", status_code=400)
+            
         # Only the Buyer can release payment to the Seller (n8n: Conditions2 → token matches Seller Token)
         if not is_buyer:
             return HTMLResponse("Only the buyer can release payment", status_code=403)
@@ -97,11 +102,11 @@ async def transaction_action(
         # Status = CLOSED only if entire escrow fund has been paid out (n8n: TRANSFERRED to Seller)
         new_payment_total = payment_to_seller + remittance
         if new_payment_total >= escrow_fund:
-            case.status = StatusEnum.CLOSED
+            case.status = StatusEnum.TRANSFERRED_TO_SELLER
 
         action_message = f"Payment of {remittance / 1e18:.6f} ETH successfully released to the Seller."
-        if case.status == StatusEnum.CLOSED:
-            action_message += " The case is now CLOSED."
+        if case.status == StatusEnum.TRANSFERRED_TO_SELLER:
+            action_message += " The case is now TRANSFERRED to Seller."
 
         db.commit()
         email_service.send_payment_released(
@@ -109,8 +114,14 @@ async def transaction_action(
             seller_name=case.seller, seller_email=case.seller_email,
             buyer_name=case.buyer,   buyer_email=case.buyer_email,
             amount_eth=remittance / 1e18,
-            closed=(case.status == StatusEnum.CLOSED)
+            closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER)
         )
+    elif actionType == "request_refund":
+        if case.status == StatusEnum.DISPUTED:
+            return HTMLResponse("Refund already requested (case is already disputed).", status_code=400)
+        if case.status in [StatusEnum.TRANSFERRED_TO_SELLER, StatusEnum.CLOSED]:
+            return HTMLResponse("Cannot request refund, payment has already been released.", status_code=400)
+            
         # Only the Buyer can request a refund
         if not is_buyer:
             return HTMLResponse("Only the buyer can request a refund", status_code=403)

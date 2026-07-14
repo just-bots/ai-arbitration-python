@@ -20,10 +20,18 @@ class StatusEnum(str, enum.Enum):
     PENDING = 'PENDING'
     SIGNED = 'SIGNED'
     DECLINED = 'DECLINED'
+    EFFECTIVE = 'EFFECTIVE'
+    REQUESTED = 'REQUESTED'
+    TRANSFERRED_TO_SELLER = 'TRANSFERRED to Seller'
+    TRANSFERRED_TO_BUYER = 'TRANSFERRED to Buyer'
     DISPUTED = 'DISPUTED'
-    PROCESSING = 'PROCESSING'
-    DECIDED = 'DECIDED'
-    CLOSED = 'CLOSED'
+    PROCESSING_LOCKED = 'PROCESSING: Locked'
+    DECIDED_LOCKED = 'DECIDED: Locked'
+    UNDER_REVIEW_LOCKED = 'UNDER REVIEW: Locked'
+    DISTRIBUTED = 'DISTRIBUTED'
+    CLOSED_NO_ESCROW = 'CLOSED: No Escrow'
+    CLOSED_NO_AWARD = 'CLOSED: No Award'
+    CLOSED = 'CLOSED' # General closed fallback
 
 class LabelEnum(str, enum.Enum):
     SETUP = 'Setup'

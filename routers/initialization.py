@@ -2,6 +2,7 @@ import hashlib
 import os
 import secrets
 import uuid
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Request, Form, UploadFile, File, Depends
@@ -48,6 +49,13 @@ async def create_case(
     escrow_fund_wei = int(escrow_fund_eth * 1e18)
     fee_wei         = PROCESSING_FEE
 
+    # Regex validation for wallet
+    wallet_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
+    if seller_wallet and not wallet_pattern.match(seller_wallet):
+        return HTMLResponse("Invalid seller wallet address format. Must be an Ethereum address.", status_code=400)
+    if buyer_wallet and not wallet_pattern.match(buyer_wallet):
+        return HTMLResponse("Invalid buyer wallet address format. Must be an Ethereum address.", status_code=400)
+
     # 1. Generate IDs and Tokens
     case_id      = f"CASE-{secrets.token_hex(4).upper()}"
     seller_token = secrets.token_urlsafe(16)
@@ -68,6 +76,9 @@ async def create_case(
         with open(file_path, "wb") as f:
             f.write(file_content)
 
+    folder_link = f"storage/evidence/{case_id}"
+    os.makedirs(folder_link, exist_ok=True)
+
     # 3. Create Case Record
     new_case = Case(
         case_id=case_id,
@@ -80,6 +91,8 @@ async def create_case(
         buyer_token=buyer_token,
         seller_wallet=seller_wallet or None,
         buyer_wallet=buyer_wallet or None,
+        contract_text=contract_text,
+        folder_link=folder_link,
         # Financials in Wei (n8n: EscrowFund in wei, Fee = $vars.PROCESSING_FEE in wei)
         escrow_fund=escrow_fund_wei,
         fee=fee_wei,
@@ -152,7 +165,7 @@ async def success_page(request: Request, case_id: str, db: Session = Depends(get
     return templates.TemplateResponse("success.html", {"request": request, "case": case})
 
 @router.get("/response", response_class=HTMLResponse)
-async def signature_response(
+async def signature_confirm(
     request: Request, 
     caseId: str, 
     party: str, 
@@ -160,21 +173,69 @@ async def signature_response(
     token: str, 
     db: Session = Depends(get_db)
 ):
+    """Renders the 2-step confirmation page showing contract terms before accepting/declining."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
     # Validate token
-    if party.lower() == "seller" and token != case.seller_token:
+    party_lower = party.lower()
+    if party_lower == "seller" and token != case.seller_token:
         return HTMLResponse("Invalid token", status_code=403)
-    elif party.lower() == "buyer" and token != case.buyer_token:
+    elif party_lower == "buyer" and token != case.buyer_token:
         return HTMLResponse("Invalid token", status_code=403)
-    elif party.lower() not in ["seller", "buyer"]:
+    elif party_lower not in ["seller", "buyer"]:
         return HTMLResponse("Invalid party", status_code=400)
+        
+    # Duplicate/Late-Response Guard
+    if party_lower == "seller" and case.seller_response:
+        return HTMLResponse(f"You have already submitted a response: {case.seller_response.value}", status_code=400)
+    if party_lower == "buyer" and case.buyer_response:
+        return HTMLResponse(f"You have already submitted a response: {case.buyer_response.value}", status_code=400)
+
+    if action.lower() not in ["accept", "decline"]:
+        return HTMLResponse("Invalid action parameter.", status_code=400)
+
+    return templates.TemplateResponse("response_confirm.html", {
+        "request": request, 
+        "case": case, 
+        "party": party,
+        "action": action.lower(),
+        "token": token
+    })
+
+@router.post("/response-submit", response_class=HTMLResponse)
+async def signature_submit(
+    request: Request, 
+    caseId: str = Form(...), 
+    party: str = Form(...), 
+    action: str = Form(...), 
+    token: str = Form(...), 
+    db: Session = Depends(get_db)
+):
+    """Processes the form submission from the confirmation page."""
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case:
+        return HTMLResponse("Case not found", status_code=404)
+        
+    # Validate token
+    party_lower = party.lower()
+    if party_lower == "seller" and token != case.seller_token:
+        return HTMLResponse("Invalid token", status_code=403)
+    elif party_lower == "buyer" and token != case.buyer_token:
+        return HTMLResponse("Invalid token", status_code=403)
+    elif party_lower not in ["seller", "buyer"]:
+        return HTMLResponse("Invalid party", status_code=400)
+        
+    # Duplicate/Late-Response Guard
+    if party_lower == "seller" and case.seller_response:
+        return HTMLResponse("Already responded.", status_code=400)
+    if party_lower == "buyer" and case.buyer_response:
+        return HTMLResponse("Already responded.", status_code=400)
         
     response_val = ResponseEnum.ACCEPT if action.lower() == "accept" else ResponseEnum.DECLINE
     
-    if party.lower() == "seller":
+    if party_lower == "seller":
         case.seller_response = response_val
     else:
         case.buyer_response = response_val
@@ -244,6 +305,11 @@ async def wallet_submit(
         return HTMLResponse("Invalid token", status_code=403)
     elif party.lower() == "buyer" and token != case.buyer_token:
         return HTMLResponse("Invalid token", status_code=403)
+
+    # Server-side validation for wallet
+    wallet_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
+    if wallet_address and not wallet_pattern.match(wallet_address):
+        return HTMLResponse("Invalid wallet address format. Must be an Ethereum address.", status_code=400)
         
     if party.lower() == "seller":
         case.seller_wallet = wallet_address

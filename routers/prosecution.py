@@ -137,6 +137,9 @@ async def escalate_to_adjudication(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
 
+    if case.status not in [StatusEnum.PENDING, StatusEnum.SIGNED, StatusEnum.EFFECTIVE]:
+        return HTMLResponse(f"Cannot escalate. Case is currently in {case.status.value} status.", status_code=400)
+
     # Matches n8n "Record Dispute1" node: Status=DISPUTED, Dispute Time=now
     case.status = StatusEnum.DISPUTED
     case.dispute_time = datetime.now(timezone.utc)

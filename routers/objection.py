@@ -23,7 +23,7 @@ async def appeal_form(request: Request, caseId: str, token: str, db: Session = D
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    if case.status != StatusEnum.DECIDED:
+    if case.status != StatusEnum.DECIDED_LOCKED:
         return HTMLResponse(
             "<h1>Invalid Status</h1><p>You can only object to a case that has an active decision and has not yet been closed or reverted.</p>", 
             status_code=400
@@ -67,8 +67,8 @@ async def submit_appeal(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    if case.status != StatusEnum.DECIDED:
-        return HTMLResponse("Case is not in DECIDED state.", status_code=400)
+    if case.status != StatusEnum.DECIDED_LOCKED:
+        return HTMLResponse("Case is not in DECIDED_LOCKED state.", status_code=400)
         
     party = RoleEnum.BUYER if token == case.buyer_token else RoleEnum.SELLER
     email = case.buyer_email if party == RoleEnum.BUYER else case.seller_email
@@ -85,7 +85,7 @@ async def submit_appeal(
     db.add(msg)
     
     # Update case status pending admin review
-    case.status = StatusEnum.DECIDED  # closest available; stays DECIDED pending HITL review
+    case.status = StatusEnum.UNDER_REVIEW_LOCKED
     case.appeal_time = datetime.now(timezone.utc)
     db.commit()
 
@@ -130,7 +130,7 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
         return HTMLResponse("Case not found", status_code=404)
         
     if action == "uphold":
-        case.status = StatusEnum.DECIDED
+        case.status = StatusEnum.DISTRIBUTED
         db.commit()
 
         # Notify both parties the ruling stands and distribute awards
