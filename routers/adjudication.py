@@ -6,9 +6,14 @@ from datetime import datetime, timezone
 import os
 
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.tools import tool
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel, Field
+import PyPDF2
 
-from database import get_db
+from database import get_db, SessionLocal
 from models import Case, StatusEnum, Message, File
 from dependencies import verify_admin_token
 import email_service
@@ -46,6 +51,39 @@ def read_evidence_files(case_id: str, db: Session):
         submitter = f.submitter.value if f.submitter else 'SYSTEM'
         file_table += f"| {submitter} | {f.original_name} | {f.hash} |\n"
     return file_table
+
+UPLOAD_DIR = "uploads"
+
+@tool
+def read_evidence_file(file_hash: str) -> str:
+    """Reads the text content of an uploaded evidence file by its hash.
+    Use this to read the details of PDF or TXT files submitted by parties."""
+    db = SessionLocal()
+    try:
+        db_file = db.query(File).filter(File.hash == file_hash).first()
+        if not db_file:
+            return "File not found."
+            
+        file_path = os.path.join(UPLOAD_DIR, db_file.secure_name)
+        if not os.path.exists(file_path):
+            return "File missing from disk."
+            
+        if db_file.original_name.lower().endswith('.pdf'):
+            try:
+                with open(file_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    text = "\\n".join([page.extract_text() or "" for page in reader.pages])
+                    return text[:5000] # Limit length
+            except Exception as e:
+                return f"Could not read PDF: {e}"
+        else:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()[:5000]
+            except Exception as e:
+                return f"Could not read text file: {e}"
+    finally:
+        db.close()
 
 @router.post("/run", response_class=HTMLResponse)
 async def run_adjudication(request: Request, caseId: str = Form(...), db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
@@ -105,41 +143,47 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
 ```
 """
 
-    # 2. Setup LangChain Models
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    # 2. Setup LangChain Models with Fallbacks
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    
+    if not openai_api_key:
         return HTMLResponse(
             "<h1>AI Setup Required</h1><p>Error: <code>OPENAI_API_KEY</code> environment variable is not set. Please set it in your terminal to run the AI Adjudicator.</p>", 
             status_code=500
         )
     
-    # Initialize the LLM (temperature=0 for deterministic rulings)
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    primary_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    # If Gemini is configured, use it as fallback. Otherwise, fallback to a smaller OpenAI model.
+    if gemini_api_key:
+        fallback_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+    else:
+        fallback_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        
+    resilient_llm = primary_llm.with_fallbacks([fallback_llm])
     
-    magistrate_llm = llm.with_structured_output(MagistrateReport)
-    final_judge_llm = llm.with_structured_output(FinalRuling)
-    
-    # 3. Magistrate Judge Stage
+    # 3. Magistrate Judge Stage (Agent with Tools)
     magistrate_system_prompt = (
         "You are a Magistrate Judge conducting impartial case investigation for an automated arbitration system. "
-        "Your role is to analyze evidence and prepare a neutral investigation report—not to issue final rulings.\n\n"
-        "---\n\n"
-        "## INVESTIGATION PROTOCOL\n\n"
-        "**1. Evidence Review**\n"
-        "- Inspect all files listed in the Evidence Files table (refer to filenames and SHA-256 hashes)\n"
-        "- For damage/condition claims, review all associated file metadata\n"
-        "- If a file is inaccessible or missing, mark it 'NOT REVIEWED' in your reasoning\n\n"
-        "**2. Financial Calculations**\n"
-        "- All currency values are in Wei (1 ETH = 1,000,000,000,000,000,000 Wei)\n"
-        "- Verify: recommended_buyer_payout + recommended_seller_payout = escrow_balance\n"
-        "- Both payouts must be non-negative Wei integers (as strings, no leading zeros)\n\n"
-        "**3. Burden of Proof**\n"
-        "- Both parties bear equal burden of proof\n"
-        "- Document all verified facts in the `facts` array\n"
-        "- Flag conflicts in the `contradictions` array (e.g., 'Buyer claims delivery on Feb 5, but tracking shows Feb 7')\n"
-        "- Add unsupported claims to `unsubstantiated_claims` array\n"
-        "- Do not fill evidence gaps with assumptions\n\n"
-        "**4. Analysis Requirements**\n"
+        "Your role is to analyze evidence and prepare a neutral investigation report—not to issue final rulings.\\n\\n"
+        "---\\n\\n"
+        "## INVESTIGATION PROTOCOL\\n\\n"
+        "**1. Evidence Review**\\n"
+        "- Inspect all files listed in the Evidence Files table (refer to filenames and SHA-256 hashes)\\n"
+        "- IMPORTANT: YOU MUST CALL THE `read_evidence_file` TOOL WITH THE FILE HASH TO READ PDF OR TXT FILES! DO NOT GUESS CONTENTS.\\n"
+        "- For damage/condition claims, review all associated file metadata\\n"
+        "- If a file is inaccessible or missing, mark it 'NOT REVIEWED' in your reasoning\\n\\n"
+        "**2. Financial Calculations**\\n"
+        "- All currency values are in Wei (1 ETH = 1,000,000,000,000,000,000 Wei)\\n"
+        "- Verify: recommended_buyer_payout + recommended_seller_payout = escrow_balance\\n"
+        "- Both payouts must be non-negative Wei integers (as strings, no leading zeros)\\n\\n"
+        "**3. Burden of Proof**\\n"
+        "- Both parties bear equal burden of proof\\n"
+        "- Document all verified facts in the `facts` array\\n"
+        "- Flag conflicts in the `contradictions` array (e.g., 'Buyer claims delivery on Feb 5, but tracking shows Feb 7')\\n"
+        "- Add unsupported claims to `unsubstantiated_claims` array\\n"
+        "- Do not fill evidence gaps with assumptions\\n\\n"
+        "**4. Analysis Requirements**\\n"
         "- Build chronological timeline from messages and files\n"
         "- Compare contract terms against party claims\n"
         "- Cross-reference file metadata with verbal statements\n"
@@ -159,15 +203,29 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         "- `recommended_seller_payout`: Wei string (must sum with buyer payout to escrow_balance)\n"
     )
     
+    # Create the agent
+    magistrate_prompt = ChatPromptTemplate.from_messages([
+        ("system", magistrate_system_prompt),
+        ("user", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ])
+    
+    tools = [read_evidence_file]
+    magistrate_agent = create_tool_calling_agent(resilient_llm, tools, magistrate_prompt)
+    magistrate_executor = AgentExecutor(agent=magistrate_agent, tools=tools, verbose=True)
+    
     try:
-        magistrate_report = magistrate_llm.invoke([
-            {"role": "system", "content": magistrate_system_prompt},
-            {"role": "user", "content": user_prompt}
-        ])
+        raw_report = magistrate_executor.invoke({"input": user_prompt})["output"]
+        # Extract the structured JSON from the raw report text using the resilient LLM
+        magistrate_report = resilient_llm.with_structured_output(MagistrateReport).invoke(
+            f"Extract the magistrate report strictly matching the JSON schema from this text:\\n\\n{raw_report}"
+        )
     except Exception as e:
         return HTMLResponse(f"Magistrate Agent Error: {str(e)}", status_code=500)
         
     # 4. Final Judge Stage
+    final_judge_llm = resilient_llm.with_structured_output(FinalRuling)
+    
     judge_system_prompt = (
         "You are the Final Judge issuing legally binding rulings in an arbitration system.\n\n"
         "## AUTHORITY & CONSTRAINTS\n\n"

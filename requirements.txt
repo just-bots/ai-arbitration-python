@@ -8,4 +8,8 @@ langchain
 langchain-openai
 langchain-community
 pydantic
+PyPDF2
+langchain-google-genai
 python-dotenv
+httpx
+apscheduler
