@@ -91,9 +91,13 @@ async def submit_appeal(
     case.appeal_time = datetime.now(timezone.utc)
     db.commit()
 
+    # Generate combined hash token (n8n design)
+    combined = f"{case.buyer_token}{case.seller_token}".encode()
+    admin_token = hashlib.sha256(combined).hexdigest()
+    
     # Notify admin that a review is required
     objecting_name = case.buyer if party == RoleEnum.BUYER else case.seller
-    review_url = f"{BASE_URL}/objection/review?caseId={caseId}"
+    review_url = f"{BASE_URL}/objection/review?caseId={caseId}&token={admin_token}"
     if ADMIN_EMAIL:
         email_service.send_objection_received(
             case_id=caseId, objecting_party=objecting_name,
@@ -109,11 +113,15 @@ async def submit_appeal(
     """)
 
 @router.get("/review", response_class=HTMLResponse)
-async def review_dashboard(request: Request, caseId: str, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
+async def review_dashboard(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
     """Admin dashboard to review an objection."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
         return HTMLResponse("Case not found", status_code=404)
+        
+    expected_token = hashlib.sha256(f"{case.buyer_token}{case.seller_token}".encode()).hexdigest()
+    if not secrets.compare_digest(token, expected_token):
+        return HTMLResponse("Invalid token", status_code=403)
         
     # Get the latest appeal message
     appeal_msg = db.query(Message).filter(Message.case_id == caseId, Message.label == LabelEnum.APPEAL).order_by(Message.time.desc()).first()
@@ -121,18 +129,34 @@ async def review_dashboard(request: Request, caseId: str, db: Session = Depends(
     return templates.TemplateResponse("objection_review.html", {
         "request": request,
         "case": case,
-        "appeal": appeal_msg
+        "appeal": appeal_msg,
+        "token": token
     })
 
 @router.post("/review", response_class=HTMLResponse)
-async def process_review(request: Request, caseId: str = Form(...), action: str = Form(...), db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
+async def process_review(request: Request, caseId: str = Form(...), action: str = Form(...), token: str = Form(...), db: Session = Depends(get_db)):
     """Processes the Admin's decision (Uphold or Reverse)."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
+    expected_token = hashlib.sha256(f"{case.buyer_token}{case.seller_token}".encode()).hexdigest()
+    if not secrets.compare_digest(token, expected_token):
+        return HTMLResponse("Invalid token", status_code=403)
+        
     if action == "uphold":
-        case.status = StatusEnum.DISTRIBUTED
+        # Idempotency check: Guard against double-payout
+        if int(case.payment_to_seller or 0) > 0 or int(case.refund_to_buyer or 0) > 0:
+            return HTMLResponse("Funds have already been distributed.", status_code=400)
+            
+        case.payment_to_seller = int(case.seller_award or 0)
+        case.refund_to_buyer = int(case.buyer_award or 0)
+        
+        if case.payment_to_seller == 0 and case.refund_to_buyer == 0:
+            case.status = StatusEnum.CLOSED_NO_AWARD
+        else:
+            case.status = StatusEnum.CLOSED
+            
         db.commit()
 
         # Notify both parties the ruling stands and distribute awards

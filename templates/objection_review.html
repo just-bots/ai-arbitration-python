@@ -40,6 +40,7 @@
             
             <form action="/objection/review" method="post" style="display: flex; justify-content: center; gap: 1rem;">
                 <input type="hidden" name="caseId" value="{{ case.case_id }}">
+                <input type="hidden" name="token" value="{{ token }}">
                 
                 <button type="submit" name="action" value="uphold" class="btn" style="background: #27AE60; padding: 1rem 2rem; font-size: 1rem;">
                     ✓ Uphold Ruling (Distribute Funds)
