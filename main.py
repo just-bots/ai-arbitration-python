@@ -27,8 +27,12 @@ register_exception_handlers(app)
 
 from scheduler import start_scheduler
 
+from database import engine
+import models
+
 @app.on_event("startup")
 def startup_event():
+    models.Base.metadata.create_all(bind=engine)
     app.state.scheduler = start_scheduler()
 
 @app.on_event("shutdown")
