@@ -18,17 +18,7 @@ import email_service
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 templates = Jinja2Templates(directory="templates")
 
-@router.get("/verify", response_class=HTMLResponse)
-async def verify_deposit_confirm(request: Request, caseId: str, db: Session = Depends(get_db)):
-    case = db.query(Case).filter(Case.case_id == caseId).first()
-    if not case: return HTMLResponse("Case not found", status_code=404)
-    return templates.TemplateResponse("action_confirm.html", {
-        "request": request, "case": case, "action_title": "Verify Deposit", "post_url": "/transactions/verify", "token": ""
-    })
-
-@router.post("/verify", response_class=HTMLResponse)
-async def verify_deposit(request: Request, caseId: str = Form(...), db: Session = Depends(get_db)):
-    """Mocks Etherscan Verification and confirms funding."""
+async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
         return HTMLResponse("Case not found", status_code=404)
@@ -87,6 +77,16 @@ async def verify_deposit(request: Request, caseId: str = Form(...), db: Session 
         "is_funded": is_funded,
         "total_required": total_required
     })
+
+@router.get("/verify", response_class=HTMLResponse)
+async def verify_deposit_get(request: Request, caseId: str, db: Session = Depends(get_db)):
+    """Triggers Etherscan Verification immediately when accessed via link."""
+    return await _verify_deposit_logic(request, caseId, db)
+
+@router.post("/verify", response_class=HTMLResponse)
+async def verify_deposit_post(request: Request, caseId: str = Form(...), db: Session = Depends(get_db)):
+    """Triggers Etherscan Verification when form button is clicked."""
+    return await _verify_deposit_logic(request, caseId, db)
 
 @router.get("/action", response_class=HTMLResponse)
 async def transaction_action_form(
