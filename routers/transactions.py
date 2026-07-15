@@ -47,13 +47,17 @@ async def verify_deposit(request: Request, caseId: str = Form(...), db: Session 
                 if data.get("status") == "1":
                     total_deposited = Decimal(0)
                     for tx in data.get("result", []):
+                        tx_timestamp = int(tx.get("timeStamp", "0"))
+                        if tx_timestamp < int(case.created_at.timestamp()):
+                            continue
+                            
                         # Match buyer to escrow deposits AND match hex input data to Case ID
                         input_hex = tx.get("input", "").lower()
                         expected_hex = "0x" + case.case_id.split("-")[-1].lower() if "-" in case.case_id else "0x" + case.case_id.lower()
                         
                         if tx.get("from", "").lower() == case.buyer_wallet.lower() and tx.get("to", "").lower() == ESCROW_WALLET.lower():
                             # Enforce case_id matching in transaction hex data to prevent cross-case misattribution
-                            if input_hex == expected_hex or not input_hex or input_hex == "0x":
+                            if input_hex == expected_hex:
                                 total_deposited += Decimal(tx.get("value", "0"))
                     case.deposited_fund = total_deposited
         except Exception as e:
@@ -61,10 +65,6 @@ async def verify_deposit(request: Request, caseId: str = Form(...), db: Session 
             # Fall back to existing amount on error
             if case.deposited_fund is None:
                 case.deposited_fund = Decimal(0)
-    elif not was_funded_already:
-        # Mocking the Etherscan deposit for local testing purposes if no API key
-        if case.deposited_fund is None or case.deposited_fund < total_required:
-            case.deposited_fund = total_required
 
     # Check state transitions
     if case.deposited_fund >= total_required and not was_funded_already:
