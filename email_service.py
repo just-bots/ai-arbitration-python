@@ -312,11 +312,12 @@ def send_escrow_confirmed(case_id: str,
     {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=request_refund", "↩️ Request Refund (or Withdraw)", "#d97706")}
     """
 
-    send_email(seller_name, f"Escrow Confirmed — Agreement Active ({case_id})",
-               _wrap_html("Escrow Confirmed", seller_body))
+    send_email(seller_email, f"Escrow Confirmed — Agreement Active ({case_id})",
+               _wrap_html("Escrow Confirmed", seller_body),
+               text_body=f"Escrow confirmed for {case_id}. The agreement is now active.")
     send_email(buyer_email, f"Escrow Confirmed — Agreement Active ({case_id})",
                _wrap_html("Escrow Confirmed", buyer_body),
-               text_body=f"Escrow confirmed for {case_id}.\nRelease: {release_url}\nRefund: {refund_url}")
+               text_body=f"Escrow confirmed for {case_id}. The agreement is now active.")
 
 
 def send_payment_released(case_id: str, seller_name: str, seller_email: str,
