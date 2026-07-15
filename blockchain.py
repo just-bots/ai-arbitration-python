@@ -5,7 +5,7 @@ from decimal import Decimal
 TATUM_API_KEY = os.environ.get("TATUM_API_KEY", "")
 PRIVATE_KEY = os.environ.get("PRIVATE_KEY", "")
 
-async def transfer_funds(to_address: str, amount_wei: Decimal) -> str:
+async def transfer_funds(to_address: str, amount_wei: Decimal, case_id: str = None) -> str:
     """
     Executes an on-chain transfer of funds from the Escrow wallet to the specified address.
     Returns the transaction hash on success, or raises an Exception.
@@ -33,6 +33,11 @@ async def transfer_funds(to_address: str, amount_wei: Decimal) -> str:
         "amount": amount_eth,
         "fromPrivateKey": PRIVATE_KEY
     }
+    
+    if case_id:
+        # Include Case ID hex as transaction data
+        expected_hex = case_id.split("-")[-1].lower() if "-" in case_id else case_id.lower()
+        payload["data"] = "0x" + expected_hex
     
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload, headers=headers)

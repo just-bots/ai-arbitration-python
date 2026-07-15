@@ -168,7 +168,7 @@ async def request_action(
         from blockchain import transfer_funds
         try:
             if amount_eth > 0 and case.seller_wallet:
-                asyncio.run(transfer_funds(case.seller_wallet, int(amount_wei)))
+                asyncio.run(transfer_funds(case.seller_wallet, int(amount_wei), case.case_id))
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
@@ -185,7 +185,7 @@ async def request_action(
         from blockchain import transfer_funds
         try:
             if amount_eth > 0 and case.buyer_wallet:
-                asyncio.run(transfer_funds(case.buyer_wallet, int(amount_wei)))
+                asyncio.run(transfer_funds(case.buyer_wallet, int(amount_wei), case.case_id))
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
@@ -249,7 +249,7 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
         from blockchain import transfer_funds
         try:
             if remittance > 0 and case.buyer_wallet:
-                asyncio.run(transfer_funds(case.buyer_wallet, remittance))
+                asyncio.run(transfer_funds(case.buyer_wallet, remittance, case.case_id))
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
