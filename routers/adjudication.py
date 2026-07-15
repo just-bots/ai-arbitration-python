@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.tools import tool
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 import PyPDF2
 
@@ -191,14 +191,21 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
             status_code=500
         )
     
-    primary_llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    # If Gemini is configured, use it as fallback. Otherwise, fallback to a smaller OpenAI model.
+    # Magistrate LLM (Multimodal, Heavy, Slow)
+    magistrate_primary = ChatOpenAI(model="gpt-4o", temperature=0)
     if gemini_api_key:
-        fallback_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+        magistrate_fallback = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
     else:
-        fallback_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        
-    resilient_llm = primary_llm.with_fallbacks([fallback_llm])
+        magistrate_fallback = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    magistrate_llm = magistrate_primary.with_fallbacks([magistrate_fallback])
+
+    # Final Judge LLM (Text-only, Fast, Efficient)
+    judge_primary = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    if gemini_api_key:
+        judge_fallback = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+    else:
+        judge_fallback = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+    judge_llm = judge_primary.with_fallbacks([judge_fallback])
     
     # Create the agent
     magistrate_prompt = ChatPromptTemplate.from_messages([
@@ -207,17 +214,17 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         ("placeholder", "{agent_scratchpad}")
     ])
     
-    agent = create_tool_calling_agent(resilient_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
+    agent = create_tool_calling_agent(magistrate_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
     agent_executor = AgentExecutor(agent=agent, tools=[read_evidence_file, calculator, external_verification], verbose=True)
     
     raw_report = agent_executor.invoke({"input": user_prompt})["output"]
-    # Extract the structured JSON from the raw report text using the resilient LLM
-    magistrate_report = resilient_llm.with_structured_output(MagistrateReport).invoke(
+    # Extract the structured JSON from the raw report text using the fast judge_llm
+    magistrate_report = judge_llm.with_structured_output(MagistrateReport).invoke(
         f"Extract the magistrate report strictly matching the JSON schema from this text:\n\n{raw_report}"
     )
         
     # 4. Final Judge Stage
-    final_judge_llm = resilient_llm.with_structured_output(FinalRuling)
+    final_judge_llm = judge_llm.with_structured_output(FinalRuling)
     
     judge_system_prompt = (
         "You are the Final Judge issuing legally binding rulings in an arbitration system.\n\n"
