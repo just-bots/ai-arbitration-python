@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Depends, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
@@ -7,9 +7,8 @@ import os
 
 from database import get_db
 from models import Case, StatusEnum, Message, RoleEnum, LabelEnum
-from dependencies import verify_admin_token
 import email_service
-import os
+import hashlib
 import secrets
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")

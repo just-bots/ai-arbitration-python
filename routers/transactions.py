@@ -12,7 +12,7 @@ ETHERSCAN_API_KEY = os.environ.get("ETHERSCAN_API_KEY", "")
 ESCROW_WALLET = os.environ.get("ESCROW_WALLET", "0x0000000000000000000000000000000000000000")
 
 from database import get_db
-from models import Case, StatusEnum, RoleEnum, Message, LabelEnum
+from models import Case, StatusEnum
 import email_service
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
@@ -62,11 +62,16 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
             case.status = StatusEnum.EFFECTIVE
         db.commit()
 
+        # Calculate excess ETH if any
+        excess_wei = max(0, int(case.deposited_fund) - int(total_required))
+        excess_eth = excess_wei / 1e18
+
         # Send funding confirmed emails
         email_service.send_escrow_confirmed(
             case_id=caseId,
             seller_name=case.seller, seller_email=case.seller_email, seller_token=case.seller_token,
-            buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_token=case.buyer_token
+            buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_token=case.buyer_token,
+            excess_eth=excess_eth
         )
 
     is_funded = case.deposited_fund >= total_required
@@ -106,10 +111,15 @@ async def transaction_action_form(
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
         
-    escrow_fund       = int(case.escrow_fund       or 0)
-    payment_to_seller = int(case.payment_to_seller or 0)
-    refund_to_buyer   = int(case.refund_to_buyer   or 0)
-    remaining_eth = (escrow_fund - payment_to_seller - refund_to_buyer) / 1e18
+    if actionType in ["withdraw_excess", "tip_excess"]:
+        total_required = (case.escrow_fund or 0) + (case.fee or 0)
+        excess_wei = max(0, int(case.deposited_fund or 0) - int(total_required) - int(case.buyer_withdrawal or 0) - int(case.tip_to_seller or 0))
+        remaining_eth = excess_wei / 1e18
+    else:
+        escrow_fund       = int(case.escrow_fund       or 0)
+        payment_to_seller = int(case.payment_to_seller or 0)
+        refund_to_buyer   = int(case.refund_to_buyer   or 0)
+        remaining_eth = (escrow_fund - payment_to_seller - refund_to_buyer) / 1e18
 
     party = "Buyer" if is_buyer else "Seller"
 
@@ -195,6 +205,48 @@ async def request_action(
         if hasattr(email_service, "send_refund_released"):
             email_service.send_refund_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, amount_eth, closed=(case.status == StatusEnum.CLOSED))
         msg = "Refund successfully sent to Buyer."
+    elif actionType == "withdraw_excess":
+        if not is_buyer: return HTMLResponse("Only buyer can withdraw excess", status_code=403)
+        total_required = (case.escrow_fund or 0) + (case.fee or 0)
+        excess_wei = max(0, int(case.deposited_fund or 0) - int(total_required) - int(case.buyer_withdrawal or 0) - int(case.tip_to_seller or 0))
+        amount_wei_int = int(amount_wei)
+        
+        if amount_wei_int <= 0 or amount_wei_int > excess_wei:
+            return HTMLResponse("Invalid or insufficient excess funds.", status_code=400)
+            
+        case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + amount_wei_int
+        
+        import asyncio
+        from blockchain import transfer_funds
+        try:
+            if case.buyer_wallet:
+                asyncio.run(transfer_funds(case.buyer_wallet, amount_wei_int, case.case_id))
+        except Exception as e:
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        db.commit()
+        msg = f"Successfully withdrawn {amount_eth} ETH from excess funds."
+    elif actionType == "tip_excess":
+        if not is_buyer: return HTMLResponse("Only buyer can tip excess", status_code=403)
+        total_required = (case.escrow_fund or 0) + (case.fee or 0)
+        excess_wei = max(0, int(case.deposited_fund or 0) - int(total_required) - int(case.buyer_withdrawal or 0) - int(case.tip_to_seller or 0))
+        amount_wei_int = int(amount_wei)
+        
+        if amount_wei_int <= 0 or amount_wei_int > excess_wei:
+            return HTMLResponse("Invalid or insufficient excess funds.", status_code=400)
+            
+        case.tip_to_seller = int(case.tip_to_seller or 0) + amount_wei_int
+        
+        import asyncio
+        from blockchain import transfer_funds
+        try:
+            if case.seller_wallet:
+                asyncio.run(transfer_funds(case.seller_wallet, amount_wei_int, case.case_id))
+        except Exception as e:
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        db.commit()
+        msg = f"Successfully sent {amount_eth} ETH as a tip to the Seller."
     else:
         return HTMLResponse("Invalid action", status_code=400)
 

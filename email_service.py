@@ -45,7 +45,7 @@ def send_email(to: str, subject: str, html_body: str, text_body: Optional[str] =
     if not _is_configured():
         # Graceful fallback — log to console for local dev without SMTP
         print(f"\n{'─'*60}")
-        print(f"📧  EMAIL (not sent — SMTP not configured)")
+        print("📧  EMAIL (not sent — SMTP not configured)")
         print(f"    To      : {to}")
         print(f"    Subject : {subject}")
         if attachment_path: print(f"    Attach  : {attachment_path}")
@@ -237,25 +237,26 @@ def send_contract_signed(case_id: str, seller_name: str, seller_email: str,
                           buyer_name: str, buyer_email: str,
                           escrow_address: str, escrow_eth: float, total_eth: float) -> None:
     """Sent to both parties when the contract is fully signed — instructs Buyer to fund escrow."""
-    deposit_body = lambda name: f"""
-    <p>Hello <strong>{name}</strong>,</p>
-    <p>Both parties have accepted the contract. The case is now <strong>SIGNED</strong>.</p>
-    {_case_badge(case_id)}
-    <p>The Buyer (<strong>{buyer_name}</strong>) must now deposit escrow to activate the agreement.</p>
-    <p>
-      <strong>Escrow Wallet Address:</strong><br>
-      <code style="background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:6px;
-                   font-size:14px;color:#a5b4fc;">{escrow_address}</code>
-    </p>
-    <p><strong>Amount to deposit:</strong> {total_eth:.6f} ETH
-       <span style="color:#64748b;font-size:13px;">(includes 0.001 ETH platform fee)</span></p>
-    <p style="color:#94a3b8;font-size:13px;">
-      Include your Case ID hex <strong>0x{case_id.split('-')[-1]}</strong> in the transaction memo/data field.
-    </p>
-    <div style="margin-top:20px;">
-      {_btn(f"{BASE_URL}/transactions/verify?caseId={case_id}", "🔍 Verify Escrow Deposit", "#0284c7")}
-    </div>
-    """
+    def deposit_body(name):
+        return f"""
+        <p>Hello <strong>{name}</strong>,</p>
+        <p>Both parties have accepted the contract. The case is now <strong>SIGNED</strong>.</p>
+        {_case_badge(case_id)}
+        <p>The Buyer (<strong>{buyer_name}</strong>) must now deposit escrow to activate the agreement.</p>
+        <p>
+          <strong>Escrow Wallet Address:</strong><br>
+          <code style="background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:6px;
+                       font-size:14px;color:#a5b4fc;">{escrow_address}</code>
+        </p>
+        <p><strong>Amount to deposit:</strong> {total_eth:.6f} ETH
+           <span style="color:#64748b;font-size:13px;">(includes 0.001 ETH platform fee)</span></p>
+        <p style="color:#94a3b8;font-size:13px;">
+          Include your Case ID hex <strong>0x{case_id.split('-')[-1]}</strong> in the transaction memo/data field.
+        </p>
+        <div style="margin-top:20px;">
+          {_btn(f"{BASE_URL}/transactions/verify?caseId={case_id}", "🔍 Verify Escrow Deposit", "#0284c7")}
+        </div>
+        """
     for name, email in [(seller_name, seller_email), (buyer_name, buyer_email)]:
         send_email(
             to=email,
@@ -269,13 +270,14 @@ def send_contract_declined(case_id: str, declining_party: str,
                             seller_name: str, seller_email: str,
                             buyer_name: str, buyer_email: str) -> None:
     """Sent to both parties when a contract is declined."""
-    body = lambda name: f"""
-    <p>Hello <strong>{name}</strong>,</p>
-    <p><strong>{declining_party}</strong> has declined the contract. Case <strong>{case_id}</strong>
-       is now closed.</p>
-    {_case_badge(case_id)}
-    <p style="color:#94a3b8;">No further action is required.</p>
-    """
+    def body(name):
+        return f"""
+        <p>Hello <strong>{name}</strong>,</p>
+        <p><strong>{declining_party}</strong> has declined the contract. Case <strong>{case_id}</strong>
+           is now closed.</p>
+        {_case_badge(case_id)}
+        <p style="color:#94a3b8;">No further action is required.</p>
+        """
     for name, email in [(seller_name, seller_email), (buyer_name, buyer_email)]:
         send_email(
             to=email,
@@ -289,7 +291,8 @@ def send_contract_declined(case_id: str, declining_party: str,
 
 def send_escrow_confirmed(case_id: str,
                            seller_name: str, seller_email: str, seller_token: str,
-                           buyer_name: str, buyer_email: str, buyer_token: str) -> None:
+                           buyer_name: str, buyer_email: str, buyer_token: str,
+                           excess_eth: float = 0.0) -> None:
     """Sent to both parties when escrow deposit is confirmed."""
     seller_body = f"""
     <p>Hello <strong>{seller_name}</strong>,</p>
@@ -308,9 +311,19 @@ def send_escrow_confirmed(case_id: str,
     {_case_badge(case_id)}
     <p>Once you are satisfied with the delivered services, release payment to the Seller.
        If you have a concern, you can request a refund.</p>
-    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=send_payment", "💰 Send Payment (or Tip)", "#16a34a")}
-    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=request_refund", "↩️ Request Refund (or Withdraw)", "#d97706")}
+    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=send_payment", "💰 Send Payment", "#16a34a")}
+    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=request_refund", "↩️ Request Refund", "#d97706")}
     """
+
+    if excess_eth > 0:
+        buyer_body += f"""
+        <div style="margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.08);">
+            <h4 style="color:#a5b4fc;margin:0 0 10px 0;">Excess Funds Detected</h4>
+            <p style="font-size:14px;">You deposited an excess of <strong>{excess_eth:.6f} ETH</strong> beyond the required escrow and fee. You can withdraw this excess back to your wallet or send it as a tip to the Seller at any time.</p>
+            {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=withdraw_excess", "💸 Withdraw Excess", "#6366f1")}
+            {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=tip_excess", "🎁 Tip Seller", "#ec4899")}
+        </div>
+        """
 
     send_email(seller_email, f"Escrow Confirmed — Agreement Active ({case_id})",
                _wrap_html("Escrow Confirmed", seller_body),

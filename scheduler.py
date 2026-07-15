@@ -18,7 +18,7 @@ def check_disputed_cases():
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         cases = db.query(Case).filter(
             Case.status == StatusEnum.DISPUTED,
-            Case.dispute_time != None,
+            Case.dispute_time is not None,
             Case.dispute_time <= seven_days_ago
         ).all()
         for case in cases:
@@ -43,7 +43,7 @@ def check_transaction_timeouts():
         
         # Check payment requests
         payment_cases = db.query(Case).filter(
-            Case.payment_request_time != None,
+            Case.payment_request_time is not None,
             Case.payment_request_time <= seven_days_ago
         ).all()
         
@@ -66,7 +66,7 @@ def check_transaction_timeouts():
 
         # Check refund requests
         refund_cases = db.query(Case).filter(
-            Case.refund_request_time != None,
+            Case.refund_request_time is not None,
             Case.refund_request_time <= seven_days_ago
         ).all()
         
@@ -94,7 +94,7 @@ def hourly_auto_distribute():
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         lapsed_cases = db.query(Case).filter(
             Case.status == StatusEnum.DECIDED_LOCKED,
-            Case.determination_time != None,
+            Case.determination_time is not None,
             Case.determination_time <= seven_days_ago
         ).all()
         

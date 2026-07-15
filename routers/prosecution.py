@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Request, Depends, Form, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import hashlib
 import uuid
 import os
-import shutil
 import secrets
 
 from database import get_db
