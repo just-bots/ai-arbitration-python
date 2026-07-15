@@ -53,23 +53,36 @@ def send_email(to: str, subject: str, html_body: str, text_body: Optional[str] =
         print(f"{'─'*60}\n")
         return False
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = SMTP_USER
-    msg["To"]      = to
-
-    if text_body:
-        msg.attach(MIMEText(text_body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
-    
     if attachment_path and os.path.exists(attachment_path):
+        root_msg = MIMEMultipart("mixed")
+        root_msg["Subject"] = subject
+        root_msg["From"] = SMTP_USER
+        root_msg["To"] = to
+        
+        alt_msg = MIMEMultipart("alternative")
+        if text_body:
+            alt_msg.attach(MIMEText(text_body, "plain"))
+        alt_msg.attach(MIMEText(html_body, "html"))
+        root_msg.attach(alt_msg)
+        
         try:
             with open(attachment_path, "rb") as f:
                 part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
             part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
-            msg.attach(part)
+            root_msg.attach(part)
         except Exception as e:
             print(f"Failed to attach file: {e}")
+        
+        msg = root_msg
+    else:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = SMTP_USER
+        msg["To"]      = to
+
+        if text_body:
+            msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
 
     try:
         context = ssl.create_default_context()
