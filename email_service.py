@@ -237,7 +237,7 @@ def send_contract_signed(case_id: str, seller_name: str, seller_email: str,
     <p><strong>Amount to deposit:</strong> {total_eth:.6f} ETH
        <span style="color:#64748b;font-size:13px;">(includes 0.001 ETH platform fee)</span></p>
     <p style="color:#94a3b8;font-size:13px;">
-      Include your Case ID <strong>{case_id}</strong> in the transaction memo/data field.
+      Include your Case ID hex <strong>0x{case_id.split('-')[-1]}</strong> in the transaction memo/data field.
     </p>
     <div style="margin-top:20px;">
       {_btn(f"{BASE_URL}/transactions/verify?caseId={case_id}", "🔍 Verify Escrow Deposit", "#0284c7")}
