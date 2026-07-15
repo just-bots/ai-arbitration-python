@@ -5,7 +5,7 @@
 {% block content %}
 <div class="glass-card">
     <div class="card-header">
-        <h1>Request {{ "Payment" if actionType == 'request_payment' else "Refund" }}</h1>
+        <h1>{{ "Request Payment" if actionType == 'request_payment' else "Request Refund" if actionType == 'request_refund' else "Send Payment" if actionType == 'send_payment' else "Send Refund" }}</h1>
         <p>Case ID: {{ case.case_id }} | You are acting as: <strong>{{ party }}</strong></p>
     </div>
     
@@ -21,24 +21,24 @@
         <input type="hidden" name="actionType" value="{{ actionType }}">
         
         <div class="form-group">
-            <label for="amount_eth">Amount to Request (ETH)</label>
+            <label for="amount_eth">Amount (ETH)</label>
             <input type="number" step="0.000001" min="0" max="{{ remaining_eth }}" id="amount_eth" name="amount_eth" class="form-control" placeholder="e.g. 0.5" required>
-            <small style="color: #94a3b8; display: block; margin-top: 0.5rem;">Enter the exact amount you wish to request from the remaining escrow.</small>
+            <small style="color: #94a3b8; display: block; margin-top: 0.5rem;">Enter the exact amount you wish to transfer/request from the remaining escrow.</small>
         </div>
         
-        {% if actionType == 'request_payment' %}
+        {% if actionType in ['request_payment', 'send_payment'] %}
         <div class="form-group">
             <label for="tip_eth">Tip to Seller (ETH) - Optional</label>
             <input type="number" step="0.000001" min="0" id="tip_eth" name="tip_eth" class="form-control" placeholder="e.g. 0.01">
         </div>
-        {% elif actionType == 'request_refund' %}
+        {% elif actionType in ['request_refund', 'send_refund'] %}
         <div class="form-group">
             <label for="withdrawal_eth">Buyer Withdrawal (ETH) - Optional</label>
             <input type="number" step="0.000001" min="0" id="withdrawal_eth" name="withdrawal_eth" class="form-control" placeholder="e.g. 0.01">
         </div>
         {% endif %}
         
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Submit Request</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Submit Action</button>
     </form>
 </div>
 {% endblock %}

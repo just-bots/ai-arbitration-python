@@ -239,6 +239,9 @@ def send_contract_signed(case_id: str, seller_name: str, seller_email: str,
     <p style="color:#94a3b8;font-size:13px;">
       Include your Case ID <strong>{case_id}</strong> in the transaction memo/data field.
     </p>
+    <div style="margin-top:20px;">
+      {_btn(f"{BASE_URL}/transactions/verify?caseId={case_id}", "🔍 Verify Escrow Deposit", "#0284c7")}
+    </div>
     """
     for name, email in [(seller_name, seller_email), (buyer_name, buyer_email)]:
         send_email(
@@ -275,16 +278,15 @@ def send_escrow_confirmed(case_id: str,
                            seller_name: str, seller_email: str, seller_token: str,
                            buyer_name: str, buyer_email: str, buyer_token: str) -> None:
     """Sent to both parties when escrow deposit is confirmed."""
-    release_url = f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=release_payment"
-    refund_url  = f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=request_refund"
-
     seller_body = f"""
     <p>Hello <strong>{seller_name}</strong>,</p>
     <p>The escrow deposit for case <strong>{case_id}</strong> has been confirmed.
        The agreement is now <strong>active</strong>.</p>
     {_case_badge(case_id)}
     <p>The Buyer may now release payment to you once services are delivered, or request a refund.
-       You will be notified of any action taken.</p>
+       You can also proactively request a payment or send a refund to the buyer.</p>
+    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={seller_token}&actionType=request_payment", "📝 Request Payment (or Tip)", "#16a34a")}
+    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={seller_token}&actionType=send_refund", "↩️ Send Refund to Buyer", "#d97706")}
     """
     buyer_body = f"""
     <p>Hello <strong>{buyer_name}</strong>,</p>
@@ -293,8 +295,8 @@ def send_escrow_confirmed(case_id: str,
     {_case_badge(case_id)}
     <p>Once you are satisfied with the delivered services, release payment to the Seller.
        If you have a concern, you can request a refund.</p>
-    {_btn(release_url, "💰  Release Payment to Seller", "#16a34a")}
-    {_btn(refund_url,  "↩️  Request Refund", "#d97706")}
+    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=send_payment", "💰 Send Payment (or Tip)", "#16a34a")}
+    {_btn(f"{BASE_URL}/transactions/action?caseId={case_id}&token={buyer_token}&actionType=request_refund", "↩️ Request Refund (or Withdraw)", "#d97706")}
     """
 
     send_email(seller_name, f"Escrow Confirmed — Agreement Active ({case_id})",

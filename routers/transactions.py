@@ -164,6 +164,41 @@ async def request_action(
         if hasattr(email_service, "send_refund_requested"):
             email_service.send_refund_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, case.seller_token)
         msg = "Refund request submitted to Seller."
+    elif actionType == "send_payment":
+        if not is_buyer: return HTMLResponse("Only buyer can send payment", status_code=403)
+        case.payment_to_seller = int(case.payment_to_seller or 0) + int(amount_wei)
+        if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(tip_eth * 1e18)
+        import asyncio
+        from blockchain import transfer_funds
+        try:
+            if amount_eth > 0 and case.seller_wallet:
+                asyncio.run(transfer_funds(case.seller_wallet, int(amount_wei)))
+        except Exception as e:
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
+            case.status = StatusEnum.TRANSFERRED_TO_SELLER
+        db.commit()
+        if hasattr(email_service, "send_payment_released"):
+            email_service.send_payment_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, amount_eth, closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER))
+        msg = "Payment successfully sent to Seller."
+    elif actionType == "send_refund":
+        if not is_seller: return HTMLResponse("Only seller can send refund", status_code=403)
+        case.refund_to_buyer = int(case.refund_to_buyer or 0) + int(amount_wei)
+        import asyncio
+        from blockchain import transfer_funds
+        try:
+            if amount_eth > 0 and case.buyer_wallet:
+                asyncio.run(transfer_funds(case.buyer_wallet, int(amount_wei)))
+        except Exception as e:
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
+            case.status = StatusEnum.CLOSED
+        db.commit()
+        if hasattr(email_service, "send_refund_released"):
+            email_service.send_refund_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, amount_eth, closed=(case.status == StatusEnum.CLOSED))
+        msg = "Refund successfully sent to Buyer."
     else:
         return HTMLResponse("Invalid action", status_code=400)
 
