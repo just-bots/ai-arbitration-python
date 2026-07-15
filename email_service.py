@@ -19,6 +19,7 @@ import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from typing import Optional
 
 # ── Config from environment ─────────────────────────────────────────────────
@@ -35,7 +36,7 @@ def _is_configured() -> bool:
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 
 
-def send_email(to: str, subject: str, html_body: str, text_body: Optional[str] = None) -> bool:
+def send_email(to: str, subject: str, html_body: str, text_body: Optional[str] = None, attachment_path: Optional[str] = None) -> bool:
     """
     Send an email via SMTP with STARTTLS.
     Falls back to console print if SMTP is not configured.
@@ -47,6 +48,7 @@ def send_email(to: str, subject: str, html_body: str, text_body: Optional[str] =
         print(f"📧  EMAIL (not sent — SMTP not configured)")
         print(f"    To      : {to}")
         print(f"    Subject : {subject}")
+        if attachment_path: print(f"    Attach  : {attachment_path}")
         print(f"    Body    : {text_body or html_body[:300]}")
         print(f"{'─'*60}\n")
         return False
@@ -59,6 +61,15 @@ def send_email(to: str, subject: str, html_body: str, text_body: Optional[str] =
     if text_body:
         msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
+    
+    if attachment_path and os.path.exists(attachment_path):
+        try:
+            with open(attachment_path, "rb") as f:
+                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
+            msg.attach(part)
+        except Exception as e:
+            print(f"Failed to attach file: {e}")
 
     try:
         context = ssl.create_default_context()
@@ -139,7 +150,8 @@ def _case_badge(case_id: str) -> str:
 
 def send_case_registered(case_id: str, party: str, name: str, email: str,
                           token: str, counterpart_name: str,
-                          escrow_eth: float, contract_text_preview: str) -> bool:
+                          escrow_eth: float, contract_text_preview: str,
+                          attachment_path: Optional[str] = None) -> bool:
     """Sent to each party after a new case is created."""
     accept_url  = f"{BASE_URL}/response?caseId={case_id}&party={party}&action=accept&token={token}"
     decline_url = f"{BASE_URL}/response?caseId={case_id}&party={party}&action=decline&token={token}"
@@ -182,7 +194,8 @@ def send_case_registered(case_id: str, party: str, name: str, email: str,
         subject=f"Action Required: Contract Registered ({case_id})",
         html_body=_wrap_html(f"Contract Registered — {case_id}", body),
         text_body=(f"Hello {name},\n\nA contract has been registered. Case: {case_id}\n\n"
-                   f"Accept:  {accept_url}\nDecline: {decline_url}\nWallet:  {wallet_url}")
+                   f"Accept:  {accept_url}\nDecline: {decline_url}\nWallet:  {wallet_url}"),
+        attachment_path=attachment_path
     )
 
 

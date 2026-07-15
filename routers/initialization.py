@@ -66,6 +66,7 @@ async def create_case(
     secure_filename = None
     file_hash       = None
     original_name   = None
+    file_path       = None
 
     if contract_file and contract_file.filename:
         file_content    = await contract_file.read()
@@ -144,12 +145,14 @@ async def create_case(
     email_service.send_case_registered(
         case_id=case_id, party="Seller", name=seller_name, email=seller_email,
         token=seller_token, counterpart_name=buyer_name,
-        escrow_eth=escrow_eth, contract_text_preview=preview_text
+        escrow_eth=escrow_eth, contract_text_preview=preview_text,
+        attachment_path=file_path
     )
     email_service.send_case_registered(
         case_id=case_id, party="Buyer", name=buyer_name, email=buyer_email,
         token=buyer_token, counterpart_name=seller_name,
-        escrow_eth=escrow_eth, contract_text_preview=preview_text
+        escrow_eth=escrow_eth, contract_text_preview=preview_text,
+        attachment_path=file_path
     )
 
     # Redirect to success page
