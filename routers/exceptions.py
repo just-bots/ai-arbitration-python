@@ -50,30 +50,27 @@ def _format_admin_alert(request: Request, exc: Exception, tb: str) -> str:
     )
 
 
+import email_service
+
 def _send_admin_alert(alert_body: str) -> None:
     """
-    Send admin alert. In production replace this with a real email client.
+    Send admin alert via SMTP using the existing email service.
     Mirrors n8n's Gmail node with SMTP fallback (Exceptions.json).
     """
-    # Primary channel: console (replace with smtplib or SendGrid in production)
     print(f"\n--- ADMIN ALERT → {ADMIN_EMAIL} ---")
     print(alert_body)
     print("--- END ALERT ---\n")
-
-    # TODO: Production SMTP fallback
-    # smtp_host = os.environ.get("SMTP_HOST")
-    # if smtp_host:
-    #     import smtplib, ssl
-    #     from email.message import EmailMessage
-    #     msg = EmailMessage()
-    #     msg["Subject"] = "🔴 AI Arbitration — Unhandled Exception"
-    #     msg["From"]    = os.environ.get("SMTP_USER", "system@example.com")
-    #     msg["To"]      = ADMIN_EMAIL
-    #     msg.set_content(alert_body)
-    #     with smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587))) as s:
-    #         s.starttls(context=ssl.create_default_context())
-    #         s.login(os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASS"))
-    #         s.send_message(msg)
+    
+    try:
+        html_body = alert_body.replace('\n', '<br>')
+        email_service.send_email(
+            to_email=ADMIN_EMAIL,
+            subject="🔴 AI Arbitration — Unhandled Exception",
+            html_body=f"<div style='font-family:monospace'>{html_body}</div>",
+            text_body=alert_body
+        )
+    except Exception as e:
+        print(f"Failed to send admin alert email: {e}")
 
 
 def register_exception_handlers(app: FastAPI) -> None:

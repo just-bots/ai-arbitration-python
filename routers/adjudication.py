@@ -210,14 +210,11 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     agent = create_tool_calling_agent(resilient_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
     agent_executor = AgentExecutor(agent=agent, tools=[read_evidence_file, calculator, external_verification], verbose=True)
     
-    try:
-        raw_report = agent_executor.invoke({"input": user_prompt})["output"]
-        # Extract the structured JSON from the raw report text using the resilient LLM
-        magistrate_report = resilient_llm.with_structured_output(MagistrateReport).invoke(
-            f"Extract the magistrate report strictly matching the JSON schema from this text:\\n\\n{raw_report}"
-        )
-    except Exception as e:
-        return HTMLResponse(f"Magistrate Agent Error: {str(e)}", status_code=500)
+    raw_report = agent_executor.invoke({"input": user_prompt})["output"]
+    # Extract the structured JSON from the raw report text using the resilient LLM
+    magistrate_report = resilient_llm.with_structured_output(MagistrateReport).invoke(
+        f"Extract the magistrate report strictly matching the JSON schema from this text:\n\n{raw_report}"
+    )
         
     # 4. Final Judge Stage
     final_judge_llm = resilient_llm.with_structured_output(FinalRuling)
@@ -249,22 +246,16 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         "- Output ONLY valid JSON matching the schema (no extra commentary).\n"
     )
     
-    try:
-        final_ruling = final_judge_llm.invoke([
-            {"role": "system", "content": judge_system_prompt},
-            {"role": "user", "content": f"Escrow Balance Requirement: {escrow_balance} Wei\n\nMagistrate Report:\n{magistrate_report.model_dump_json()}"}
-        ])
-    except Exception as e:
-        return HTMLResponse(f"Final Judge Agent Error: {str(e)}", status_code=500)
+    final_ruling = final_judge_llm.invoke([
+        {"role": "system", "content": judge_system_prompt},
+        {"role": "user", "content": f"Escrow Balance Requirement: {escrow_balance} Wei\n\nMagistrate Report:\n{magistrate_report.model_dump_json()}"}
+    ])
         
     # 5. Math Validation & Database Update
-    try:
-        buyer_award_int = int(final_ruling.buyer_award)
-        seller_award_int = int(final_ruling.seller_award)
-        if buyer_award_int + seller_award_int != escrow_balance:
-            raise ValueError(f"Math Error: Awards ({buyer_award_int} + {seller_award_int}) != Escrow Balance ({escrow_balance})")
-    except ValueError as ve:
-        return HTMLResponse(f"Validation Error: {str(ve)}", status_code=500)
+    buyer_award_int = int(final_ruling.buyer_award)
+    seller_award_int = int(final_ruling.seller_award)
+    if buyer_award_int + seller_award_int != escrow_balance:
+        raise ValueError(f"Math Error: Awards ({buyer_award_int} + {seller_award_int}) != Escrow Balance ({escrow_balance})")
         
     # Commit final ruling to DB (n8n: Record Determination node)
     # Status becomes DECIDED, Determination Time recorded
