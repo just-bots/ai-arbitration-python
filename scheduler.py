@@ -111,7 +111,7 @@ def hourly_auto_distribute():
                 buyer_award = int(case.buyer_award or 0)
                 
                 # Double check idempotency
-                if int(case.payment_to_seller or 0) > 0 or int(case.refund_to_buyer or 0) > 0:
+                if int(case.seller_payout or 0) > 0 or int(case.buyer_payout or 0) > 0:
                     print(f"Skipping {case.case_id}: already partially distributed.")
                     continue
                     
@@ -121,8 +121,8 @@ def hourly_auto_distribute():
                 if buyer_award > 0 and case.buyer_wallet:
                     asyncio.run(transfer_funds(case.buyer_wallet, buyer_award, case.case_id))
                     
-                case.payment_to_seller = seller_award
-                case.refund_to_buyer = buyer_award
+                case.seller_payout = seller_award
+                case.buyer_payout = buyer_award
                 case.status = StatusEnum.CLOSED if (seller_award > 0 or buyer_award > 0) else StatusEnum.CLOSED_NO_AWARD
                 db.commit()
                 
