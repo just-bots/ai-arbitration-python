@@ -153,7 +153,7 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     signed_time = case.created_at.strftime('%Y-%m-%d %H:%M UTC') if case.created_at else 'No Signing Time'
     time_now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     
-    user_prompt = f"""
+    user_prompt_text = f"""
 # Case #{case.case_id}  
 
 **Current Time:** {time_now}  
@@ -180,10 +180,30 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
 {case.contract_text or "No contract text provided."}
 ```
 """
+    user_prompt = [{"type": "text", "text": user_prompt_text}]
+    
+    # Multimodal: append images directly to the user prompt for the Magistrate
+    db_files = db.query(File).filter(File.case_id == caseId).all()
+    for f in db_files:
+        ext = f.original_name.lower().split('.')[-1]
+        if ext in ['jpg', 'jpeg', 'png', 'webp']:
+            import base64
+            file_path = os.path.join(UPLOAD_DIR, f.secure_name)
+            try:
+                with open(file_path, 'rb') as img_file:
+                    b64 = base64.b64encode(img_file.read()).decode('utf-8')
+                    user_prompt.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/{ext};base64,{b64}"}
+                    })
+            except Exception:
+                pass
 
     # 2. Setup LangChain Models with Fallbacks
     openai_api_key = os.environ.get("OPENAI_API_KEY")
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    
+    deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
     
     if not openai_api_key:
         return HTMLResponse(
@@ -193,19 +213,21 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     
     # Magistrate LLM (Multimodal, Heavy, Slow)
     magistrate_primary = ChatOpenAI(model="gpt-4o", temperature=0)
+    magistrate_fallbacks = []
     if gemini_api_key:
-        magistrate_fallback = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
-    else:
-        magistrate_fallback = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    magistrate_llm = magistrate_primary.with_fallbacks([magistrate_fallback])
+        magistrate_fallbacks.append(ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0))
+    magistrate_fallbacks.append(ChatOpenAI(model="gpt-4o-mini", temperature=0))
+    magistrate_llm = magistrate_primary.with_fallbacks(magistrate_fallbacks)
 
     # Final Judge LLM (Text-only, Fast, Efficient)
     judge_primary = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    judge_fallbacks = []
+    if deepseek_api_key:
+        judge_fallbacks.append(ChatOpenAI(model="deepseek-chat", temperature=0, api_key=deepseek_api_key, base_url="https://api.deepseek.com/v1"))
     if gemini_api_key:
-        judge_fallback = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-    else:
-        judge_fallback = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-    judge_llm = judge_primary.with_fallbacks([judge_fallback])
+        judge_fallbacks.append(ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0))
+    judge_fallbacks.append(ChatOpenAI(model="gpt-3.5-turbo", temperature=0))
+    judge_llm = judge_primary.with_fallbacks(judge_fallbacks)
     
     # Create the agent
     magistrate_prompt = ChatPromptTemplate.from_messages([
@@ -222,6 +244,21 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     magistrate_report = judge_llm.with_structured_output(MagistrateReport).invoke(
         f"Extract the magistrate report strictly matching the JSON schema from this text:\n\n{raw_report}"
     )
+    
+    # Mathematical Validation of Magistrate Report
+    try:
+        m_buyer_wei = int(magistrate_report.recommended_buyer_payout)
+        m_seller_wei = int(magistrate_report.recommended_seller_payout)
+        if m_buyer_wei + m_seller_wei != escrow_balance:
+            print(f"Magistrate Warning: Awards ({m_buyer_wei} + {m_seller_wei}) != Escrow Balance ({escrow_balance})")
+    except Exception as e:
+        print(f"Magistrate Validation Error: {e}")
+        
+    # Audit Trail: Persist AI Report
+    os.makedirs("storage/evidence", exist_ok=True)
+    report_path = f"storage/evidence/{case.case_id}_magistrate_report.json"
+    with open(report_path, "w") as rf:
+        rf.write(magistrate_report.model_dump_json(indent=2))
         
     # 4. Final Judge Stage
     final_judge_llm = judge_llm.with_structured_output(FinalRuling)
@@ -274,6 +311,13 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     case.seller_award = seller_award_int
 
     db.commit()
+
+    # Audit Trail: Persist Final Ruling
+    os.makedirs("storage/evidence", exist_ok=True)
+    ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
+    with open(ruling_path, "w") as rf:
+        rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
+
 
     # Send determination emails to both parties
     email_service.send_determination(

@@ -522,3 +522,20 @@ def send_award_distributed(case_id: str,
             html_body=_wrap_html("Award Distributed", body),
             text_body=f"Case {case_id} closed. Your award: {award} ETH."
         )
+
+def send_late_submission_reply(case_id: str, to_email: str):
+    """
+    Auto-reply when evidence is submitted past the 7-day deadline or outside the DISPUTED status.
+    """
+    subject = f"[{case_id}] Evidence Submission Rejected (Deadline Passed)"
+    text = f"Your email/evidence regarding case {case_id} could not be accepted.\n\nThe 7-day evidence collection window has either closed, or the case is no longer in the DISPUTED phase. The AI Magistrate will not consider this submission.\n\nAI Arbitration System."
+    
+    html = f"""
+    <div style="font-family: sans-serif; padding: 20px;">
+        <h2 style="color: #E74C3C;">Late Submission Rejected</h2>
+        <p>Your email and any attached evidence regarding case <strong>{case_id}</strong> could not be accepted.</p>
+        <p>The 7-day evidence collection window has either closed, or the case is no longer in the active <em>DISPUTED</em> phase.</p>
+        <p>The AI Magistrate will <strong>not</strong> consider this submission.</p>
+    </div>
+    """
+    return send_email(to_email, subject, html, text)

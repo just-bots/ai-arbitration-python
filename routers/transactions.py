@@ -30,7 +30,18 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
 
     if ETHERSCAN_API_KEY and case.buyer_wallet and not was_funded_already:
         try:
-            url = f"https://api.etherscan.io/api?module=account&action=txlist&address={ESCROW_WALLET}&startblock=0&endblock=99999999&sort=asc&apikey={ETHERSCAN_API_KEY}"
+            CHAIN_ID = os.environ.get("CHAIN_ID", "1")
+            timestamp = int(case.created_at.timestamp())
+            
+            # Fetch startblock to optimize scan
+            block_url = f"https://api.etherscan.io/v2/api?chainid={CHAIN_ID}&module=block&action=getblocknobytime&timestamp={timestamp}&closest=before&apikey={ETHERSCAN_API_KEY}"
+            async with httpx.AsyncClient() as client:
+                b_resp = await client.get(block_url)
+                b_data = b_resp.json()
+                startblock = b_data.get("result", "0") if b_data.get("status") == "1" else "0"
+
+            # Fetch transactions
+            url = f"https://api.etherscan.io/v2/api?chainid={CHAIN_ID}&module=account&action=txlist&address={ESCROW_WALLET}&startblock={startblock}&endblock=99999999&sort=asc&apikey={ETHERSCAN_API_KEY}"
             async with httpx.AsyncClient() as client:
                 resp = await client.get(url)
                 data = resp.json()
@@ -38,7 +49,7 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
                     total_deposited = Decimal(0)
                     for tx in data.get("result", []):
                         tx_timestamp = int(tx.get("timeStamp", "0"))
-                        if tx_timestamp < int(case.created_at.timestamp()):
+                        if tx_timestamp < timestamp:
                             continue
                             
                         # Match buyer to escrow deposits AND match hex input data to Case ID
@@ -46,13 +57,11 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
                         expected_hex = "0x" + case.case_id.split("-")[-1].lower() if "-" in case.case_id else "0x" + case.case_id.lower()
                         
                         if tx.get("from", "").lower() == case.buyer_wallet.lower() and tx.get("to", "").lower() == ESCROW_WALLET.lower():
-                            # Enforce case_id matching in transaction hex data to prevent cross-case misattribution
                             if input_hex == expected_hex:
                                 total_deposited += Decimal(tx.get("value", "0"))
                     case.deposited_fund = total_deposited
         except Exception as e:
             print(f"Etherscan error: {e}")
-            # Fall back to existing amount on error
             if case.deposited_fund is None:
                 case.deposited_fund = Decimal(0)
 
@@ -172,6 +181,7 @@ async def request_action(
         msg = "Refund request submitted to Seller."
     elif actionType == "send_payment":
         if not is_buyer: return HTMLResponse("Only buyer can send payment", status_code=403)
+        if not case.seller_wallet: return HTMLResponse("No Seller Wallet provided", status_code=400)
         case.payment_to_seller = int(case.payment_to_seller or 0) + int(amount_wei)
         if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(tip_eth * 1e18)
         import asyncio
@@ -190,6 +200,7 @@ async def request_action(
         msg = "Payment successfully sent to Seller."
     elif actionType == "send_refund":
         if not is_seller: return HTMLResponse("Only seller can send refund", status_code=403)
+        if not case.buyer_wallet: return HTMLResponse("No Buyer Wallet provided", status_code=400)
         case.refund_to_buyer = int(case.refund_to_buyer or 0) + int(amount_wei)
         import asyncio
         from blockchain import transfer_funds

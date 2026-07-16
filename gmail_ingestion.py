@@ -5,9 +5,10 @@ import re
 import os
 import hashlib
 import uuid
-from datetime import datetime, timezone
+import email_service
+from datetime import datetime, timezone, timedelta
 from database import SessionLocal
-from models import Case, Message, File, RoleEnum, LabelEnum
+from models import Case, Message, File, RoleEnum, LabelEnum, StatusEnum
 
 GMAIL_USERNAME = os.environ.get("GMAIL_USERNAME", "Law.Economist@gmail.com")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "spvg ylox vtho ovuk")
@@ -71,6 +72,20 @@ def process_inbound_emails():
                     case = db.query(Case).filter(Case.case_id == case_id).first()
                     if not case:
                         print(f"[Gmail Ingestion] Skipping email: Case {case_id} not found in DB.")
+                        continue
+                        
+                    # Deadline Enforcement
+                    now = datetime.now(timezone.utc)
+                    if case.status != StatusEnum.DISPUTED:
+                        print(f"[Gmail Ingestion] Skipping email: Case {case_id} is not in DISPUTED state (Status: {case.status}).")
+                        if hasattr(email_service, 'send_late_submission_reply'):
+                            email_service.send_late_submission_reply(case.case_id, sender_email)
+                        continue
+                        
+                    if case.dispute_time and now > (case.dispute_time + timedelta(days=7)):
+                        print(f"[Gmail Ingestion] Skipping email: Case {case_id} 7-day evidence window has expired.")
+                        if hasattr(email_service, 'send_late_submission_reply'):
+                            email_service.send_late_submission_reply(case.case_id, sender_email)
                         continue
                         
                     # Determine Role

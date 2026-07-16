@@ -110,28 +110,59 @@ def hourly_auto_distribute():
                 seller_award = int(case.seller_award or 0)
                 buyer_award = int(case.buyer_award or 0)
                 
-                # Double check idempotency
-                if int(case.seller_payout or 0) > 0 or int(case.buyer_payout or 0) > 0:
-                    print(f"Skipping {case.case_id}: already partially distributed.")
+                # Terminal States: No Escrow vs No Award
+                escrow_fund = int(case.escrow_fund or 0)
+                payment_to_seller = int(case.payment_to_seller or 0)
+                refund_to_buyer = int(case.refund_to_buyer or 0)
+                available = escrow_fund - payment_to_seller - refund_to_buyer
+                
+                if available <= 0:
+                    case.status = StatusEnum.CLOSED_NO_ESCROW
+                    db.commit()
                     continue
                     
-                # Execute Blockchain transfers
-                if seller_award > 0 and case.seller_wallet:
-                    asyncio.run(transfer_funds(case.seller_wallet, seller_award, case.case_id))
-                if buyer_award > 0 and case.buyer_wallet:
-                    asyncio.run(transfer_funds(case.buyer_wallet, buyer_award, case.case_id))
-                    
-                case.seller_payout = seller_award
-                case.buyer_payout = buyer_award
-                case.status = StatusEnum.CLOSED if (seller_award > 0 or buyer_award > 0) else StatusEnum.CLOSED_NO_AWARD
-                db.commit()
+                if seller_award == 0 and buyer_award == 0:
+                    case.status = StatusEnum.CLOSED_NO_AWARD
+                    db.commit()
+                    continue
+
+                # Process Seller Transfer
+                if seller_award > 0 and int(case.seller_payout or 0) == 0:
+                    if case.seller_wallet:
+                        try:
+                            asyncio.run(transfer_funds(case.seller_wallet, seller_award, case.case_id))
+                            case.seller_payout = seller_award
+                            db.commit()
+                        except Exception as e:
+                            print(f"Seller transfer error for {case.case_id}: {e}")
+                    else:
+                        print(f"No seller wallet for {case.case_id}. Skipping seller transfer.")
+                        
+                # Process Buyer Transfer
+                if buyer_award > 0 and int(case.buyer_payout or 0) == 0:
+                    if case.buyer_wallet:
+                        try:
+                            asyncio.run(transfer_funds(case.buyer_wallet, buyer_award, case.case_id))
+                            case.buyer_payout = buyer_award
+                            db.commit()
+                        except Exception as e:
+                            print(f"Buyer transfer error for {case.case_id}: {e}")
+                    else:
+                        print(f"No buyer wallet for {case.case_id}. Skipping buyer transfer.")
+
+                # Final Status Update & Notification
+                seller_ok = (seller_award == 0) or (int(case.seller_payout or 0) > 0)
+                buyer_ok = (buyer_award == 0) or (int(case.buyer_payout or 0) > 0)
                 
-                # Notify
-                email_service.send_award_distributed(
-                    case_id=case.case_id,
-                    seller_name=case.seller, seller_email=case.seller_email, seller_award_eth=seller_award/1e18,
-                    buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_award_eth=buyer_award/1e18
-                )
+                if seller_ok and buyer_ok:
+                    case.status = StatusEnum.CLOSED
+                    db.commit()
+                    
+                    email_service.send_award_distributed(
+                        case_id=case.case_id,
+                        seller_name=case.seller, seller_email=case.seller_email, seller_award_eth=seller_award/1e18,
+                        buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_award_eth=buyer_award/1e18
+                    )
             except Exception as e:
                 print(f"Error distributing funds for {case.case_id}: {e}")
     finally:
