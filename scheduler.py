@@ -8,7 +8,7 @@ import email_service
 from gmail_ingestion import process_inbound_emails
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "default_insecure_admin_key")
+ADMIN_KEY = os.environ["ADMIN_KEY"]
 
 def check_disputed_cases():
     print("[Scheduler] Checking for ripe disputed cases (past evidence window)...")
@@ -18,7 +18,7 @@ def check_disputed_cases():
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         cases = db.query(Case).filter(
             Case.status == StatusEnum.DISPUTED,
-            Case.dispute_time is not None,
+            Case.dispute_time.isnot(None),
             Case.dispute_time <= seven_days_ago
         ).all()
         for case in cases:
@@ -43,13 +43,23 @@ def check_transaction_timeouts():
         
         # Check payment requests
         payment_cases = db.query(Case).filter(
-            Case.payment_request_time is not None,
+            Case.payment_request_time.isnot(None),
             Case.payment_request_time <= seven_days_ago
         ).all()
         
         for case in payment_cases:
             print(f"[Scheduler] Auto-approving payment for {case.case_id}")
             remittance = int(case.requested_payment_amount or 0)
+            
+            import asyncio
+            from blockchain import transfer_funds
+            try:
+                if remittance > 0 and case.seller_wallet:
+                    asyncio.run(transfer_funds(case.seller_wallet, remittance, case.case_id))
+            except Exception as e:
+                print(f"[Scheduler] Blockchain Transfer Failed for {case.case_id}: {e}")
+                continue
+                
             case.payment_to_seller = int(case.payment_to_seller or 0) + remittance
             case.payment_request_time = None
             case.requested_payment_amount = None
@@ -66,13 +76,23 @@ def check_transaction_timeouts():
 
         # Check refund requests
         refund_cases = db.query(Case).filter(
-            Case.refund_request_time is not None,
+            Case.refund_request_time.isnot(None),
             Case.refund_request_time <= seven_days_ago
         ).all()
         
         for case in refund_cases:
             print(f"[Scheduler] Auto-approving refund for {case.case_id}")
             remittance = int(case.requested_refund_amount or 0)
+            
+            import asyncio
+            from blockchain import transfer_funds
+            try:
+                if remittance > 0 and case.buyer_wallet:
+                    asyncio.run(transfer_funds(case.buyer_wallet, remittance, case.case_id))
+            except Exception as e:
+                print(f"[Scheduler] Blockchain Transfer Failed for {case.case_id}: {e}")
+                continue
+                
             case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
             case.refund_request_time = None
             case.requested_refund_amount = None
@@ -90,11 +110,27 @@ def hourly_auto_distribute():
     print("[Scheduler] Checking for DISTRIBUTED cases to execute on-chain transfer...")
     db = SessionLocal()
     try:
+        # Immediate Terminal States check for DECIDED_LOCKED cases
+        immediate_close = db.query(Case).filter(Case.status == StatusEnum.DECIDED_LOCKED).all()
+        for case in immediate_close:
+            escrow_fund = int(case.escrow_fund or 0)
+            payment_to_seller = int(case.payment_to_seller or 0)
+            refund_to_buyer = int(case.refund_to_buyer or 0)
+            available = escrow_fund - payment_to_seller - refund_to_buyer
+            if available <= 0:
+                print(f"[Scheduler] Immediate close (No Escrow) for {case.case_id}")
+                case.status = StatusEnum.CLOSED_NO_ESCROW
+                db.commit()
+            elif int(case.seller_award or 0) == 0 and int(case.buyer_award or 0) == 0:
+                print(f"[Scheduler] Immediate close (No Award) for {case.case_id}")
+                case.status = StatusEnum.CLOSED_NO_AWARD
+                db.commit()
+
         # Also check for DECIDED_LOCKED cases where 7-day appeal window has lapsed
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         lapsed_cases = db.query(Case).filter(
             Case.status == StatusEnum.DECIDED_LOCKED,
-            Case.determination_time is not None,
+            Case.determination_time.isnot(None),
             Case.determination_time <= seven_days_ago
         ).all()
         

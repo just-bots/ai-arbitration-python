@@ -39,6 +39,7 @@ class LabelEnum(str, enum.Enum):
     APPEAL = 'Appeal'
     REQUEST_PAYMENT = 'Request Payment'
     REQUEST_REFUND = 'Request Refund'
+    EVIDENCE = 'Evidence'
 
 class Case(Base):
     __tablename__ = 'cases'

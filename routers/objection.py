@@ -152,13 +152,12 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
         case.buyer_payout = int(case.buyer_award or 0)
         
         # Trigger blockchain transfers
-        import asyncio
         from blockchain import transfer_funds
         try:
             if case.seller_wallet and case.seller_payout > 0:
-                asyncio.run(transfer_funds(case.seller_wallet, case.seller_payout, case.case_id))
+                await transfer_funds(case.seller_wallet, case.seller_payout, case.case_id)
             if case.buyer_wallet and case.buyer_payout > 0:
-                asyncio.run(transfer_funds(case.buyer_wallet, case.buyer_payout, case.case_id))
+                await transfer_funds(case.buyer_wallet, case.buyer_payout, case.case_id)
         except Exception as e:
             print(f"Transfer error: {e}")
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)

@@ -11,7 +11,7 @@ from database import SessionLocal
 from models import Case, Message, File, RoleEnum, LabelEnum, StatusEnum
 
 GMAIL_USERNAME = os.environ.get("GMAIL_USERNAME", "Law.Economist@gmail.com")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "spvg ylox vtho ovuk")
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 IMAP_SERVER = "imap.gmail.com"
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)

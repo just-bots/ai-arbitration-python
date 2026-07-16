@@ -3,7 +3,7 @@ import secrets
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader, APIKeyQuery
 
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "default_insecure_admin_key")
+ADMIN_KEY = os.environ["ADMIN_KEY"]
 
 api_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 api_key_query = APIKeyQuery(name="admin_key", auto_error=False)

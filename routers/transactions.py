@@ -184,15 +184,15 @@ async def request_action(
     elif actionType == "send_payment":
         if not is_buyer: return HTMLResponse("Only buyer can send payment", status_code=403)
         if not case.seller_wallet: return HTMLResponse("No Seller Wallet provided", status_code=400)
-        case.payment_to_seller = int(case.payment_to_seller or 0) + int(amount_wei)
-        if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(tip_eth * 1e18)
-        import asyncio
         from blockchain import transfer_funds
         try:
             if amount_eth > 0 and case.seller_wallet:
-                asyncio.run(transfer_funds(case.seller_wallet, int(amount_wei), case.case_id))
+                await transfer_funds(case.seller_wallet, int(amount_wei), case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        case.payment_to_seller = int(case.payment_to_seller or 0) + int(amount_wei)
+        if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(tip_eth * 1e18)
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.TRANSFERRED_TO_SELLER
@@ -203,14 +203,14 @@ async def request_action(
     elif actionType == "send_refund":
         if not is_seller: return HTMLResponse("Only seller can send refund", status_code=403)
         if not case.buyer_wallet: return HTMLResponse("No Buyer Wallet provided", status_code=400)
-        case.refund_to_buyer = int(case.refund_to_buyer or 0) + int(amount_wei)
-        import asyncio
         from blockchain import transfer_funds
         try:
             if amount_eth > 0 and case.buyer_wallet:
-                asyncio.run(transfer_funds(case.buyer_wallet, int(amount_wei), case.case_id))
+                await transfer_funds(case.buyer_wallet, int(amount_wei), case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        case.refund_to_buyer = int(case.refund_to_buyer or 0) + int(amount_wei)
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED
@@ -227,16 +227,14 @@ async def request_action(
         if amount_wei_int <= 0 or amount_wei_int > excess_wei:
             return HTMLResponse("Invalid or insufficient excess funds.", status_code=400)
             
-        case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + amount_wei_int
-        
-        import asyncio
         from blockchain import transfer_funds
         try:
             if case.buyer_wallet:
-                asyncio.run(transfer_funds(case.buyer_wallet, amount_wei_int, case.case_id))
+                await transfer_funds(case.buyer_wallet, amount_wei_int, case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
+        case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + amount_wei_int
         db.commit()
         msg = f"Successfully withdrawn {amount_eth} ETH from excess funds."
     elif actionType == "tip_excess":
@@ -248,16 +246,14 @@ async def request_action(
         if amount_wei_int <= 0 or amount_wei_int > excess_wei:
             return HTMLResponse("Invalid or insufficient excess funds.", status_code=400)
             
-        case.tip_to_seller = int(case.tip_to_seller or 0) + amount_wei_int
-        
-        import asyncio
         from blockchain import transfer_funds
         try:
             if case.seller_wallet:
-                asyncio.run(transfer_funds(case.seller_wallet, amount_wei_int, case.case_id))
+                await transfer_funds(case.seller_wallet, amount_wei_int, case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
+        case.tip_to_seller = int(case.tip_to_seller or 0) + amount_wei_int
         db.commit()
         msg = f"Successfully sent {amount_eth} ETH as a tip to the Seller."
     else:
@@ -287,6 +283,14 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
     if actionType == "request_payment" and is_buyer:
         # Buyer approves seller's payment
         remittance = int(case.requested_payment_amount or 0)
+        
+        from blockchain import transfer_funds
+        try:
+            if remittance > 0 and case.seller_wallet:
+                await transfer_funds(case.seller_wallet, remittance, case.case_id)
+        except Exception as e:
+            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
         case.payment_to_seller = int(case.payment_to_seller or 0) + remittance
         case.payment_request_time = None
         case.requested_payment_amount = None
@@ -304,19 +308,19 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
     elif actionType == "request_refund" and is_seller:
         # Seller approves buyer's refund
         remittance = int(case.requested_refund_amount or 0)
-        case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
-        case.refund_request_time = None
-        case.requested_refund_amount = None
         
         # Add tip to seller payout if tip exists, and subtract withdrawal from buyer payout if exists
         # Execute blockchain transfer
-        import asyncio
         from blockchain import transfer_funds
         try:
             if remittance > 0 and case.buyer_wallet:
-                asyncio.run(transfer_funds(case.buyer_wallet, remittance, case.case_id))
+                await transfer_funds(case.buyer_wallet, remittance, case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            
+        case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
+        case.refund_request_time = None
+        case.requested_refund_amount = None
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Depends, Form, UploadFile
+from fastapi import APIRouter, Request, Depends, Form, UploadFile, File as FastAPIFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -46,7 +46,7 @@ async def post_evidence(
     caseId: str = Form(...), 
     token: str = Form(...), 
     argument: str = Form(...),
-    files: list[UploadFile] = [],
+    files: list[UploadFile] = FastAPIFile(default=[]),
     db: Session = Depends(get_db)
 ):
     """Processes evidence submission, hashes files, and links to the case."""
