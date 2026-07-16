@@ -15,7 +15,7 @@ from models import Case, Message, File as DBFile, StatusEnum, LabelEnum, RoleEnu
 import email_service
 
 # Platform constants from environment (mirrors n8n $vars)
-ESCROW_WALLET    = os.environ.get("ESCROW_WALLET", "0x0000000000000000000000000000000000000000")
+ESCROW_WALLET    = os.environ.get("ESCROW_WALLET", "0xdd2Be83773B37564581c2C3Cd2282d34A3E4e584")
 PROCESSING_FEE   = int(os.environ.get("PROCESSING_FEE", "1000000000000000"))  # Wei; default 0.001 ETH
 BASE_URL         = os.environ.get("BASE_URL", "http://localhost:8000/")
 
