@@ -25,7 +25,12 @@
         </div>
         <h1>Awaiting Deposit</h1>
         <div class="success-details">
-            <p>We are currently waiting for <strong>{{ (total_required / 1000000000000000000) }} ETH</strong> to be deposited.</p>
+            {% if case.deposited_fund and case.deposited_fund > 0 %}
+                <p>We have received a partial deposit of <strong style="color: #27ae60;">{{ (case.deposited_fund / 1000000000000000000) }} ETH</strong>.</p>
+                <p>Please deposit the remaining <strong>{{ ((total_required - case.deposited_fund) / 1000000000000000000) }} ETH</strong> to activate the contract.</p>
+            {% else %}
+                <p>We are currently waiting for <strong>{{ (total_required / 1000000000000000000) }} ETH</strong> to be deposited.</p>
+            {% endif %}
             <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin: 15px 0; text-align: left;">
                 <p style="margin-top:0; font-size: 14px; color: #a5b4fc;"><strong>How to deposit:</strong></p>
                 <ol style="margin-bottom:0; padding-left: 20px; font-size: 13px; color: #cbd5e1;">
@@ -38,7 +43,7 @@
             <p style="font-size: 13px; color: #94a3b8;">Our system continually monitors the blockchain and will update this status once confirmed.</p>
             <form action="/transactions/verify" method="POST" style="margin-top: 15px;">
                 <input type="hidden" name="caseId" value="{{ case.case_id }}">
-                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 10px;">Check Etherscan Again</button>
+                <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">Check Etherscan Again</button>
             </form>
         </div>
     {% endif %}

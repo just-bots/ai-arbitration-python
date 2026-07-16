@@ -65,14 +65,16 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
             if case.deposited_fund is None:
                 case.deposited_fund = Decimal(0)
 
+    current_deposit = case.deposited_fund or Decimal(0)
+
     # Check state transitions
-    if case.deposited_fund >= total_required and not was_funded_already:
+    if current_deposit >= total_required and not was_funded_already:
         if case.status == StatusEnum.SIGNED:
             case.status = StatusEnum.EFFECTIVE
         db.commit()
 
         # Calculate excess ETH if any
-        excess_wei = max(0, int(case.deposited_fund) - int(total_required))
+        excess_wei = max(0, int(current_deposit) - int(total_required))
         excess_eth = excess_wei / 1e18
 
         # Send funding confirmed emails
@@ -83,7 +85,7 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
             excess_eth=excess_eth
         )
 
-    is_funded = case.deposited_fund >= total_required
+    is_funded = current_deposit >= total_required
 
     return templates.TemplateResponse("deposit_status.html", {
         "request": request, 
