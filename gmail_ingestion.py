@@ -62,8 +62,8 @@ def process_inbound_emails():
                         email_match = re.search(r'<(.+?)>', sender_raw)
                         sender_email = email_match.group(1) if email_match else sender_raw
                     
-                    # Extract Case ID from Subject (e.g., CASE-1234ABCD)
-                    case_match = re.search(r'CASE-[A-Fa-f0-9]{8}', subject)
+                    # Extract Case ID from Subject (e.g., 1234ABCD)
+                    case_match = re.search(r'\b[A-Fa-f0-9]{8}\b', subject)
                     if not case_match:
                         print(f"[Gmail Ingestion] Skipping email: No Case ID in subject '{subject}'")
                         continue

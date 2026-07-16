@@ -57,7 +57,7 @@ async def create_case(
         return HTMLResponse("Invalid buyer wallet address format. Must be an Ethereum address.", status_code=400)
 
     # 1. Generate IDs and Tokens
-    case_id      = f"CASE-{secrets.token_hex(4).upper()}"
+    case_id      = secrets.token_hex(4).upper()
     seller_token = secrets.token_urlsafe(16)
     buyer_token  = secrets.token_urlsafe(16)
     now          = datetime.now(timezone.utc)
