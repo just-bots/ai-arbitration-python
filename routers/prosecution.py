@@ -10,6 +10,7 @@ import secrets
 
 from database import get_db
 from models import Case, StatusEnum, RoleEnum, Message, LabelEnum, File
+import validators
 
 router = APIRouter(prefix="/prosecution", tags=["Prosecution"])
 templates = Jinja2Templates(directory="templates")
@@ -25,8 +26,8 @@ async def get_evidence_form(request: Request, caseId: str, token: str, db: Sessi
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    is_buyer = secrets.compare_digest(token, case.buyer_token)
-    is_seller = secrets.compare_digest(token, case.seller_token)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
@@ -54,8 +55,8 @@ async def post_evidence(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    is_buyer = secrets.compare_digest(token, case.buyer_token)
-    is_seller = secrets.compare_digest(token, case.seller_token)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
@@ -81,6 +82,10 @@ async def post_evidence(
     for upload in files:
         if not upload.filename:
             continue
+            
+        is_valid, err = validators.validate_file_upload(upload.filename, upload.size, upload.content_type)
+        if not is_valid:
+            return HTMLResponse(f"File upload error: {err}", status_code=400)
             
         secure_filename = f"{uuid.uuid4()}_{upload.filename}"
         file_path = os.path.join(STORAGE_DIR, secure_filename)
@@ -141,7 +146,9 @@ async def escalate_to_adjudication(
     if case.status not in [StatusEnum.PENDING, StatusEnum.SIGNED, StatusEnum.EFFECTIVE]:
         return HTMLResponse(f"Cannot escalate. Case is currently in {case.status.value} status.", status_code=400)
 
-    if not (secrets.compare_digest(token, case.buyer_token) or secrets.compare_digest(token, case.seller_token)):
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_buyer and not is_seller:
         return HTMLResponse("Unauthorized token.", status_code=403)
 
     # Matches n8n "Record Dispute1" node: Status=DISPUTED, Dispute Time=now

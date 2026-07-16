@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Case, Message, File as DBFile, StatusEnum, LabelEnum, RoleEnum, ResponseEnum
 import email_service
+import validators
 
 # Platform constants from environment (mirrors n8n $vars)
 ESCROW_WALLET    = os.environ.get("ESCROW_WALLET", "0xdd2Be83773B37564581c2C3Cd2282d34A3E4e584")
@@ -49,11 +50,12 @@ async def create_case(
     escrow_fund_wei = int(escrow_fund_eth * 1e18)
 
     # Regex validation for wallet
-    wallet_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
-    if seller_wallet and not wallet_pattern.match(seller_wallet):
-        return HTMLResponse("Invalid seller wallet address format. Must be an Ethereum address.", status_code=400)
-    if buyer_wallet and not wallet_pattern.match(buyer_wallet):
-        return HTMLResponse("Invalid buyer wallet address format. Must be an Ethereum address.", status_code=400)
+    if seller_wallet:
+        is_valid, err = validators.validate_ethereum_address(seller_wallet)
+        if not is_valid: return HTMLResponse(err, status_code=400)
+    if buyer_wallet:
+        is_valid, err = validators.validate_ethereum_address(buyer_wallet)
+        if not is_valid: return HTMLResponse(err, status_code=400)
 
     # 1. Generate IDs and Tokens
     case_id      = secrets.token_hex(4).upper()
@@ -169,9 +171,10 @@ async def view_terms(request: Request, caseId: str, token: str, db: Session = De
     """Displays the full legal agreement text."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case: return HTMLResponse("Case not found", status_code=404)
-    if not secrets.compare_digest(token, case.buyer_token) and not secrets.compare_digest(token, case.seller_token):
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_seller and not is_buyer:
         return HTMLResponse("Invalid token", status_code=403)
-        
     return templates.TemplateResponse("terms.html", {"request": request, "case": case})
 
 @router.get("/response", response_class=HTMLResponse)
@@ -189,19 +192,14 @@ async def signature_confirm(
         return HTMLResponse("Case not found", status_code=404)
         
     # Validate token
-    party_lower = party.lower()
-    if party_lower == "seller" and not secrets.compare_digest(token, case.seller_token):
-        return HTMLResponse("Invalid token", status_code=403)
-    elif party_lower == "buyer" and not secrets.compare_digest(token, case.buyer_token):
-        return HTMLResponse("Invalid token", status_code=403)
-    elif party_lower not in ["seller", "buyer"]:
-        return HTMLResponse("Invalid party", status_code=400)
+    is_valid, err, party_lower = validators.validate_party_token(case, party, token)
+    if not is_valid:
+        return HTMLResponse(err, status_code=403 if "token" in err else 400)
         
     # Duplicate/Late-Response Guard
-    if party_lower == "seller" and case.seller_response:
-        return HTMLResponse(f"You have already submitted a response: {case.seller_response.value}", status_code=400)
-    if party_lower == "buyer" and case.buyer_response:
-        return HTMLResponse(f"You have already submitted a response: {case.buyer_response.value}", status_code=400)
+    has_responded, response_val = validators.check_party_already_responded(case, party_lower)
+    if has_responded:
+        return HTMLResponse(f"You have already submitted a response: {response_val}", status_code=400)
 
     if action.lower() not in ["accept", "decline"]:
         return HTMLResponse("Invalid action parameter.", status_code=400)
@@ -229,18 +227,13 @@ async def signature_submit(
         return HTMLResponse("Case not found", status_code=404)
         
     # Validate token
-    party_lower = party.lower()
-    if party_lower == "seller" and not secrets.compare_digest(token, case.seller_token):
-        return HTMLResponse("Invalid token", status_code=403)
-    elif party_lower == "buyer" and not secrets.compare_digest(token, case.buyer_token):
-        return HTMLResponse("Invalid token", status_code=403)
-    elif party_lower not in ["seller", "buyer"]:
-        return HTMLResponse("Invalid party", status_code=400)
+    is_valid, err, party_lower = validators.validate_party_token(case, party, token)
+    if not is_valid:
+        return HTMLResponse(err, status_code=403 if "token" in err else 400)
         
     # Duplicate/Late-Response Guard
-    if party_lower == "seller" and case.seller_response:
-        return HTMLResponse("Already responded.", status_code=400)
-    if party_lower == "buyer" and case.buyer_response:
+    has_responded, _ = validators.check_party_already_responded(case, party_lower)
+    if has_responded:
         return HTMLResponse("Already responded.", status_code=400)
         
     response_val = ResponseEnum.ACCEPT if action.lower() == "accept" else ResponseEnum.DECLINE
@@ -291,10 +284,9 @@ async def wallet_form(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    if party.lower() == "seller" and not secrets.compare_digest(token, case.seller_token):
-        return HTMLResponse("Invalid token", status_code=403)
-    elif party.lower() == "buyer" and not secrets.compare_digest(token, case.buyer_token):
-        return HTMLResponse("Invalid token", status_code=403)
+    is_valid, err, _ = validators.validate_party_token(case, party, token)
+    if not is_valid:
+        return HTMLResponse(err, status_code=403)
         
     return templates.TemplateResponse("wallet_form.html", {"request": request, "case": case, "party": party, "token": token})
 
@@ -311,15 +303,14 @@ async def wallet_submit(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    if party.lower() == "seller" and not secrets.compare_digest(token, case.seller_token):
-        return HTMLResponse("Invalid token", status_code=403)
-    elif party.lower() == "buyer" and not secrets.compare_digest(token, case.buyer_token):
-        return HTMLResponse("Invalid token", status_code=403)
+    is_valid, err, _ = validators.validate_party_token(case, party, token)
+    if not is_valid:
+        return HTMLResponse(err, status_code=403)
 
     # Server-side validation for wallet
-    wallet_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
-    if wallet_address and not wallet_pattern.match(wallet_address):
-        return HTMLResponse("Invalid wallet address format. Must be an Ethereum address.", status_code=400)
+    if wallet_address:
+        is_valid, err = validators.validate_ethereum_address(wallet_address)
+        if not is_valid: return HTMLResponse(err, status_code=400)
         
     if party.lower() == "seller":
         case.seller_wallet = wallet_address

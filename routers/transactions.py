@@ -12,8 +12,9 @@ ETHERSCAN_API_KEY = os.environ.get("ETHERSCAN_API_KEY", "")
 ESCROW_WALLET = os.environ.get("ESCROW_WALLET", "0x0000000000000000000000000000000000000000")
 
 from database import get_db
-from models import Case, StatusEnum
+from models import Case, StatusEnum, RoleEnum
 import email_service
+import validators
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 templates = Jinja2Templates(directory="templates")
@@ -117,8 +118,8 @@ async def transaction_action_form(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    is_buyer = secrets.compare_digest(token, case.buyer_token)
-    is_seller = secrets.compare_digest(token, case.seller_token)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token", status_code=403)
         
@@ -157,8 +158,8 @@ async def request_action(
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case: return HTMLResponse("Case not found", status_code=404)
     
-    is_buyer = secrets.compare_digest(token, case.buyer_token)
-    is_seller = secrets.compare_digest(token, case.seller_token)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     if not is_buyer and not is_seller: return HTMLResponse("Invalid token", status_code=403)
 
     amount_wei = str(int(amount_eth * 1e18))
@@ -276,8 +277,8 @@ async def approve_transaction_confirm(request: Request, caseId: str, token: str,
 async def approve_transaction(request: Request, caseId: str = Form(...), token: str = Form(...), actionType: str = Form(...), db: Session = Depends(get_db)):
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case: return HTMLResponse("Case not found", status_code=404)
-    is_buyer = secrets.compare_digest(token, case.buyer_token)
-    is_seller = secrets.compare_digest(token, case.seller_token)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     if not is_buyer and not is_seller: return HTMLResponse("Invalid token", status_code=403)
 
     if actionType == "request_payment" and is_buyer:
@@ -349,7 +350,9 @@ async def dispute_transaction_confirm(request: Request, caseId: str, token: str,
 async def dispute_transaction(request: Request, caseId: str = Form(...), token: str = Form(...), db: Session = Depends(get_db)):
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case: return HTMLResponse("Case not found", status_code=404)
-    if not (secrets.compare_digest(token, case.buyer_token) or secrets.compare_digest(token, case.seller_token)):
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_buyer and not is_seller:
         return HTMLResponse("Invalid token", status_code=403)
 
     case.status = StatusEnum.DISPUTED

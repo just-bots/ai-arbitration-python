@@ -6,8 +6,9 @@ from datetime import datetime, timezone, timedelta
 import os
 
 from database import get_db
-from models import Case, StatusEnum, Message, RoleEnum, LabelEnum
+from models import Case, StatusEnum, RoleEnum, Message, LabelEnum
 import email_service
+import validators
 import hashlib
 import secrets
 
@@ -31,13 +32,11 @@ async def appeal_form(request: Request, caseId: str, token: str, db: Session = D
         )
         
     # Check token to determine party
-    party = None
-    if secrets.compare_digest(token, case.buyer_token):
-        party = "Buyer"
-    elif secrets.compare_digest(token, case.seller_token):
-        party = "Seller"
-    else:
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_buyer and not is_seller:
         return HTMLResponse("Invalid secure token.", status_code=403)
+    party = "Buyer" if is_buyer else "Seller"
         
     # Check 7-day deadline
     if case.determination_time:
@@ -71,7 +70,12 @@ async def submit_appeal(
     if case.status != StatusEnum.DECIDED_LOCKED:
         return HTMLResponse("Case is not in DECIDED_LOCKED state.", status_code=400)
         
-    party = RoleEnum.BUYER if secrets.compare_digest(token, case.buyer_token) else RoleEnum.SELLER
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_buyer and not is_seller:
+        return HTMLResponse("Invalid token", status_code=403)
+        
+    party = RoleEnum.BUYER if is_buyer else RoleEnum.SELLER
     email = case.buyer_email if party == RoleEnum.BUYER else case.seller_email
     
     # Save the objection
