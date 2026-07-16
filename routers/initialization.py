@@ -47,7 +47,6 @@ async def create_case(
     """Handles the form submission, saves the file (if any), and inserts into DB."""
 
     escrow_fund_wei = int(escrow_fund_eth * 1e18)
-    fee_wei         = PROCESSING_FEE
 
     # Regex validation for wallet
     wallet_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
@@ -96,7 +95,7 @@ async def create_case(
         folder_link=folder_link,
         # Financials in Wei (n8n: EscrowFund in wei, Fee = $vars.PROCESSING_FEE in wei)
         escrow_fund=escrow_fund_wei,
-        fee=fee_wei,
+        fee=PROCESSING_FEE,
         escrow_address=ESCROW_WALLET,
         # Accumulators start at 0
         payment_to_seller=0,
