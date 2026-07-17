@@ -130,6 +130,9 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     if not case:
         return HTMLResponse("Case not found", status_code=404)
 
+    if case.status != StatusEnum.DISPUTED:
+        return HTMLResponse("Case is not in DISPUTED status.", status_code=400)
+
     # LOCK the case immediately before running agents (n8n: Record Status node fires in parallel
     # at the same time as Get Messages / Get Files — before Prepare Case Packet)
     case.status = StatusEnum.PROCESSING_LOCKED
@@ -137,7 +140,8 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     db.commit()
     db.refresh(case)
 
-    messages = db.query(Message).filter(Message.case_id == caseId).order_by(Message.time).all()
+    try:
+        messages = db.query(Message).filter(Message.case_id == caseId).order_by(Message.time).all()
     # 1. Prepare Case Packet
     escrow_fund = int(case.escrow_fund or 0)
     refund_to_buyer = int(case.refund_to_buyer or 0)
@@ -301,22 +305,29 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     if buyer_award_int + seller_award_int != escrow_balance:
         raise ValueError(f"Math Error: Awards ({buyer_award_int} + {seller_award_int}) != Escrow Balance ({escrow_balance})")
         
-    # Commit final ruling to DB (n8n: Record Determination node)
-    # Status becomes DECIDED, Determination Time recorded
-    # NOTE: adjudication_time was already set above when the case was locked
-    case.status = StatusEnum.DECIDED_LOCKED
-    case.determination_time = datetime.now(timezone.utc)
-    case.decision = final_ruling.decision
-    case.buyer_award = buyer_award_int
-    case.seller_award = seller_award_int
+        # Commit final ruling to DB (n8n: Record Determination node)
+        # Status becomes DECIDED, Determination Time recorded
+        # NOTE: adjudication_time was already set above when the case was locked
+        case.status = StatusEnum.DECIDED_LOCKED
+        case.determination_time = datetime.now(timezone.utc)
+        case.decision = final_ruling.decision
+        case.buyer_award = buyer_award_int
+        case.seller_award = seller_award_int
 
-    db.commit()
+        db.commit()
 
-    # Audit Trail: Persist Final Ruling
-    os.makedirs("storage/evidence", exist_ok=True)
-    ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
-    with open(ruling_path, "w") as rf:
-        rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
+        # Audit Trail: Persist Final Ruling
+        os.makedirs("storage/evidence", exist_ok=True)
+        ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
+        with open(ruling_path, "w") as rf:
+            rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
+            
+    except Exception as e:
+        print(f"Adjudication Pipeline Failed: {e}")
+        # Revert the lock so it can be retried
+        case.status = StatusEnum.DISPUTED
+        db.commit()
+        return HTMLResponse(f"Internal Adjudication Error: {e}", status_code=500)
 
 
     # Send determination emails to both parties

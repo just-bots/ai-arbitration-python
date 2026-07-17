@@ -8,7 +8,7 @@ import email_service
 from gmail_ingestion import process_inbound_emails
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
-ADMIN_KEY = os.environ["ADMIN_KEY"]
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
 def check_disputed_cases():
     print("[Scheduler] Checking for ripe disputed cases (past evidence window)...")

@@ -148,23 +148,31 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
         return HTMLResponse("Invalid token", status_code=403)
         
     if action == "uphold":
-        # Idempotency check: Guard against double-payout using dedicated payout fields
-        if int(case.seller_payout or 0) > 0 or int(case.buyer_payout or 0) > 0:
-            return HTMLResponse("Funds have already been distributed.", status_code=400)
-            
-        case.seller_payout = int(case.seller_award or 0)
-        case.buyer_payout = int(case.buyer_award or 0)
-        
-        # Trigger blockchain transfers
+        # Handle seller and buyer payouts independently for idempotency and atomicity
         from blockchain import transfer_funds
-        try:
-            if case.seller_wallet and case.seller_payout > 0:
-                await transfer_funds(case.seller_wallet, case.seller_payout, case.case_id)
-            if case.buyer_wallet and case.buyer_payout > 0:
-                await transfer_funds(case.buyer_wallet, case.buyer_payout, case.case_id)
-        except Exception as e:
-            print(f"Transfer error: {e}")
-            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+        
+        seller_award = int(case.seller_award or 0)
+        buyer_award = int(case.buyer_award or 0)
+        
+        if seller_award > 0 and int(case.seller_payout or 0) == 0:
+            try:
+                if case.seller_wallet:
+                    await transfer_funds(case.seller_wallet, seller_award, case.case_id)
+                case.seller_payout = seller_award
+                db.commit()
+            except Exception as e:
+                print(f"Transfer error for seller: {e}")
+                return HTMLResponse(f"Blockchain Transfer Failed for Seller: {e}", status_code=500)
+                
+        if buyer_award > 0 and int(case.buyer_payout or 0) == 0:
+            try:
+                if case.buyer_wallet:
+                    await transfer_funds(case.buyer_wallet, buyer_award, case.case_id)
+                case.buyer_payout = buyer_award
+                db.commit()
+            except Exception as e:
+                print(f"Transfer error for buyer: {e}")
+                return HTMLResponse(f"Blockchain Transfer Failed for Buyer: {e}", status_code=500)
         
         if case.seller_payout == 0 and case.buyer_payout == 0:
             case.status = StatusEnum.CLOSED_NO_AWARD

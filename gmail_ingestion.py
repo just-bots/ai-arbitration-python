@@ -11,13 +11,17 @@ from database import SessionLocal
 from models import Case, Message, File, RoleEnum, LabelEnum, StatusEnum
 
 GMAIL_USERNAME = os.environ.get("GMAIL_USERNAME", "Law.Economist@gmail.com")
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 IMAP_SERVER = "imap.gmail.com"
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def process_inbound_emails():
     print("[Gmail Ingestion] Checking for unread emails...")
+    if not GMAIL_APP_PASSWORD:
+        print("[Gmail Ingestion] Error: GMAIL_APP_PASSWORD not set. Skipping email ingestion.")
+        return
+
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(GMAIL_USERNAME, GMAIL_APP_PASSWORD)

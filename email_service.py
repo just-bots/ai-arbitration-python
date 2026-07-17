@@ -233,11 +233,11 @@ def send_wallet_confirmed(case_id: str, party: str, name: str, email: str, walle
     )
 
 
-def send_contract_signed(case_id: str, seller_name: str, seller_email: str,
-                          buyer_name: str, buyer_email: str,
+def send_contract_signed(case_id: str, seller_name: str, seller_email: str, seller_token: str,
+                          buyer_name: str, buyer_email: str, buyer_token: str,
                           escrow_address: str, escrow_eth: float, total_eth: float) -> None:
     """Sent to both parties when the contract is fully signed — instructs Buyer to fund escrow."""
-    def deposit_body(name):
+    def deposit_body(name, token):
         return f"""
         <p>Hello <strong>{name}</strong>,</p>
         <p>Both parties have accepted the contract. The case is now <strong>SIGNED</strong>.</p>
@@ -254,14 +254,14 @@ def send_contract_signed(case_id: str, seller_name: str, seller_email: str,
           Include your Case ID hex <strong>0x{case_id.split('-')[-1]}</strong> in the transaction memo/data field.
         </p>
         <div style="margin-top:20px;">
-          {_btn(f"{BASE_URL}/transactions/verify?caseId={case_id}", "🔍 Verify Escrow Deposit", "#0284c7")}
+          {_btn(f"{BASE_URL}/transactions/verify?caseId={case_id}&token={token}", "🔍 Verify Escrow Deposit", "#0284c7")}
         </div>
         """
-    for name, email in [(seller_name, seller_email), (buyer_name, buyer_email)]:
+    for name, email, token in [(seller_name, seller_email, seller_token), (buyer_name, buyer_email, buyer_token)]:
         send_email(
             to=email,
             subject=f"Contract Signed — Awaiting Escrow Deposit ({case_id})",
-            html_body=_wrap_html("Contract Signed", deposit_body(name)),
+            html_body=_wrap_html("Contract Signed", deposit_body(name, token)),
             text_body=(f"Case {case_id} is SIGNED. Buyer must deposit {total_eth} ETH to {escrow_address}.")
         )
 

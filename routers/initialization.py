@@ -258,8 +258,8 @@ async def signature_submit(
         escrow_eth = float(case.escrow_fund or Decimal(0)) / 1e18
         email_service.send_contract_signed(
             case_id=case.case_id,
-            seller_name=case.seller, seller_email=case.seller_email,
-            buyer_name=case.buyer,   buyer_email=case.buyer_email,
+            seller_name=case.seller, seller_email=case.seller_email, seller_token=case.seller_token,
+            buyer_name=case.buyer,   buyer_email=case.buyer_email,   buyer_token=case.buyer_token,
             escrow_address=case.escrow_address or "(not set)",
             escrow_eth=escrow_eth, total_eth=total_eth
         )

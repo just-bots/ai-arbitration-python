@@ -15,7 +15,7 @@ async def transfer_funds(to_address: str, amount_wei: Decimal, case_id: str = No
     if amount_wei <= 0:
         raise ValueError("Amount must be greater than zero.")
         
-    amount_eth = str(float(amount_wei) / 1e18)
+    amount_eth = format(Decimal(amount_wei) / Decimal(10**18), 'f')
     
     # In local testing without a Tatum API key, mock the blockchain transfer
     if not TATUM_API_KEY or not PRIVATE_KEY:

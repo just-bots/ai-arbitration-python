@@ -43,6 +43,7 @@
             <p style="font-size: 13px; color: #94a3b8;">Our system continually monitors the blockchain and will update this status once confirmed.</p>
             <form action="/transactions/verify" method="POST" style="margin-top: 15px;">
                 <input type="hidden" name="caseId" value="{{ case.case_id }}">
+                <input type="hidden" name="token" value="{{ token }}">
                 <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">Check Etherscan Again</button>
             </form>
         </div>

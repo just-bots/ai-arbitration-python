@@ -92,17 +92,30 @@ async def _verify_deposit_logic(request: Request, caseId: str, db: Session):
         "request": request, 
         "case": case,
         "is_funded": is_funded,
-        "total_required": total_required
+        "total_required": total_required,
+        "token": getattr(request.state, "token", "") # This will be populated from query param or form
     })
 
 @router.get("/verify", response_class=HTMLResponse)
-async def verify_deposit_get(request: Request, caseId: str, db: Session = Depends(get_db)):
+async def verify_deposit_get(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
     """Triggers Etherscan Verification immediately when accessed via link."""
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_buyer and not is_seller: return HTMLResponse("Invalid token", status_code=403)
+    request.state.token = token
     return await _verify_deposit_logic(request, caseId, db)
 
 @router.post("/verify", response_class=HTMLResponse)
-async def verify_deposit_post(request: Request, caseId: str = Form(...), db: Session = Depends(get_db)):
+async def verify_deposit_post(request: Request, caseId: str = Form(...), token: str = Form(...), db: Session = Depends(get_db)):
     """Triggers Etherscan Verification when form button is clicked."""
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
+    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
+    if not is_buyer and not is_seller: return HTMLResponse("Invalid token", status_code=403)
+    request.state.token = token
     return await _verify_deposit_logic(request, caseId, db)
 
 @router.get("/action", response_class=HTMLResponse)
