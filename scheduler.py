@@ -28,7 +28,8 @@ def check_disputed_cases():
             # Trigger via HTTP to offload the heavy agentic process
             try:
                 # Use httpx post but don't wait for completion if it's long, or run in thread
-                httpx.post(f"{BASE_URL}/adjudication/run", data={"caseId": case.case_id}, headers={"X-Admin-Key": ADMIN_KEY}, timeout=1.0)
+                response = httpx.post(f"{BASE_URL}/adjudication/run", data={"caseId": case.case_id}, headers={"X-Admin-Key": ADMIN_KEY}, timeout=1.0)
+                response.raise_for_status()
             except httpx.ReadTimeout:
                 # Expected since adjudication takes minutes
                 pass
@@ -115,8 +116,13 @@ def hourly_auto_distribute():
     print("[Scheduler] Checking for DISTRIBUTED cases to execute on-chain transfer...")
     db = SessionLocal()
     try:
-        # Immediate Terminal States check for DECIDED_LOCKED cases
-        immediate_close = db.query(Case).filter(Case.status == StatusEnum.DECIDED_LOCKED).all()
+        # Immediate Terminal States check for DECIDED_LOCKED cases after the 7-day appeal window
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        immediate_close = db.query(Case).filter(
+            Case.status == StatusEnum.DECIDED_LOCKED,
+            Case.determination_time.isnot(None),
+            Case.determination_time <= seven_days_ago
+        ).all()
         for case in immediate_close:
             escrow_fund = int(case.escrow_fund or 0)
             payment_to_seller = int(case.payment_to_seller or 0)
