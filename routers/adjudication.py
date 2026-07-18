@@ -311,22 +311,22 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         if buyer_award_int + seller_award_int != escrow_balance:
             raise ValueError(f"Math Error: Awards ({buyer_award_int} + {seller_award_int}) != Escrow Balance ({escrow_balance})")
         
-            # Commit final ruling to DB (n8n: Record Determination node)
-            # Status becomes DECIDED, Determination Time recorded
-            # NOTE: adjudication_time was already set above when the case was locked
-            case.status = StatusEnum.DECIDED_LOCKED
-            case.determination_time = datetime.now(timezone.utc)
-            case.decision = final_ruling.decision
-            case.buyer_award = buyer_award_int
-            case.seller_award = seller_award_int
+        # Commit final ruling to DB (n8n: Record Determination node)
+        # Status becomes DECIDED, Determination Time recorded
+        # NOTE: adjudication_time was already set above when the case was locked
+        case.status = StatusEnum.DECIDED_LOCKED
+        case.determination_time = datetime.now(timezone.utc)
+        case.decision = final_ruling.decision
+        case.buyer_award = buyer_award_int
+        case.seller_award = seller_award_int
 
-            db.commit()
+        db.commit()
 
-            # Audit Trail: Persist Final Ruling
-            os.makedirs("storage/evidence", exist_ok=True)
-            ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
-            with open(ruling_path, "w") as rf:
-                rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
+        # Audit Trail: Persist Final Ruling
+        os.makedirs("storage/evidence", exist_ok=True)
+        ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
+        with open(ruling_path, "w") as rf:
+            rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
             
     except Exception as e:
         print(f"Adjudication Pipeline Failed: {e}")

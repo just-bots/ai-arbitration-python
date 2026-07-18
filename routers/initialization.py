@@ -4,6 +4,7 @@ import secrets
 import uuid
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Request, Form, UploadFile, File, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse

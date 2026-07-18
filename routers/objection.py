@@ -158,8 +158,8 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
             try:
                 if case.seller_wallet:
                     await transfer_funds(case.seller_wallet, seller_award, case.case_id)
-                case.seller_payout = seller_award
-                db.commit()
+                    case.seller_payout = seller_award
+                    db.commit()
             except Exception as e:
                 print(f"Transfer error for seller: {e}")
                 return HTMLResponse(f"Blockchain Transfer Failed for Seller: {e}", status_code=500)
@@ -168,8 +168,8 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
             try:
                 if case.buyer_wallet:
                     await transfer_funds(case.buyer_wallet, buyer_award, case.case_id)
-                case.buyer_payout = buyer_award
-                db.commit()
+                    case.buyer_payout = buyer_award
+                    db.commit()
             except Exception as e:
                 print(f"Transfer error for buyer: {e}")
                 return HTMLResponse(f"Blockchain Transfer Failed for Buyer: {e}", status_code=500)

@@ -50,11 +50,14 @@ def check_transaction_timeouts():
         for case in payment_cases:
             print(f"[Scheduler] Auto-approving payment for {case.case_id}")
             remittance = int(case.requested_payment_amount or 0)
+            if remittance > 0 and not case.seller_wallet:
+                print(f"[Scheduler] Cannot auto-approve payment for {case.case_id}: No seller wallet")
+                continue
             
             import asyncio
             from blockchain import transfer_funds
             try:
-                if remittance > 0 and case.seller_wallet:
+                if remittance > 0:
                     asyncio.run(transfer_funds(case.seller_wallet, remittance, case.case_id))
             except Exception as e:
                 print(f"[Scheduler] Blockchain Transfer Failed for {case.case_id}: {e}")
@@ -83,11 +86,14 @@ def check_transaction_timeouts():
         for case in refund_cases:
             print(f"[Scheduler] Auto-approving refund for {case.case_id}")
             remittance = int(case.requested_refund_amount or 0)
+            if remittance > 0 and not case.buyer_wallet:
+                print(f"[Scheduler] Cannot auto-approve refund for {case.case_id}: No buyer wallet")
+                continue
             
             import asyncio
             from blockchain import transfer_funds
             try:
-                if remittance > 0 and case.buyer_wallet:
+                if remittance > 0:
                     asyncio.run(transfer_funds(case.buyer_wallet, remittance, case.case_id))
             except Exception as e:
                 print(f"[Scheduler] Blockchain Transfer Failed for {case.case_id}: {e}")
@@ -97,7 +103,7 @@ def check_transaction_timeouts():
             case.refund_request_time = None
             case.requested_refund_amount = None
             if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-                case.status = StatusEnum.CLOSED
+                case.status = StatusEnum.TRANSFERRED_TO_BUYER
             db.commit()
 
     finally:

@@ -237,6 +237,7 @@ async def request_action(
         msg = "Refund successfully sent to Buyer."
     elif actionType == "withdraw_excess":
         if not is_buyer: return HTMLResponse("Only buyer can withdraw excess", status_code=403)
+        if not case.buyer_wallet: return HTMLResponse("No Buyer Wallet provided", status_code=400)
         total_required = (case.escrow_fund or 0) + (case.fee or 0)
         excess_wei = max(0, int(case.deposited_fund or 0) - int(total_required) - int(case.buyer_withdrawal or 0) - int(case.tip_to_seller or 0))
         amount_wei_int = int(amount_wei)
@@ -246,16 +247,16 @@ async def request_action(
             
         from blockchain import transfer_funds
         try:
-            if case.buyer_wallet:
-                await transfer_funds(case.buyer_wallet, amount_wei_int, case.case_id)
+            await transfer_funds(case.buyer_wallet, amount_wei_int, case.case_id)
+            case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + amount_wei_int
+            db.commit()
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
-        case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + amount_wei_int
-        db.commit()
         msg = f"Successfully withdrawn {amount_eth} ETH from excess funds."
     elif actionType == "tip_excess":
         if not is_buyer: return HTMLResponse("Only buyer can tip excess", status_code=403)
+        if not case.seller_wallet: return HTMLResponse("No Seller Wallet provided", status_code=400)
         total_required = (case.escrow_fund or 0) + (case.fee or 0)
         excess_wei = max(0, int(case.deposited_fund or 0) - int(total_required) - int(case.buyer_withdrawal or 0) - int(case.tip_to_seller or 0))
         amount_wei_int = int(amount_wei)
@@ -265,13 +266,12 @@ async def request_action(
             
         from blockchain import transfer_funds
         try:
-            if case.seller_wallet:
-                await transfer_funds(case.seller_wallet, amount_wei_int, case.case_id)
+            await transfer_funds(case.seller_wallet, amount_wei_int, case.case_id)
+            case.tip_to_seller = int(case.tip_to_seller or 0) + amount_wei_int
+            db.commit()
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
-        case.tip_to_seller = int(case.tip_to_seller or 0) + amount_wei_int
-        db.commit()
         msg = f"Successfully sent {amount_eth} ETH as a tip to the Seller."
     else:
         return HTMLResponse("Invalid action", status_code=400)
@@ -300,10 +300,12 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
     if actionType == "request_payment" and is_buyer:
         # Buyer approves seller's payment
         remittance = int(case.requested_payment_amount or 0)
+        if remittance > 0 and not case.seller_wallet:
+            return HTMLResponse("No Seller Wallet provided", status_code=400)
         
         from blockchain import transfer_funds
         try:
-            if remittance > 0 and case.seller_wallet:
+            if remittance > 0:
                 await transfer_funds(case.seller_wallet, remittance, case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
@@ -325,12 +327,12 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
     elif actionType == "request_refund" and is_seller:
         # Seller approves buyer's refund
         remittance = int(case.requested_refund_amount or 0)
+        if remittance > 0 and not case.buyer_wallet:
+            return HTMLResponse("No Buyer Wallet provided", status_code=400)
         
-        # Add tip to seller payout if tip exists, and subtract withdrawal from buyer payout if exists
-        # Execute blockchain transfer
         from blockchain import transfer_funds
         try:
-            if remittance > 0 and case.buyer_wallet:
+            if remittance > 0:
                 await transfer_funds(case.buyer_wallet, remittance, case.case_id)
         except Exception as e:
             return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
@@ -340,7 +342,7 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
         case.requested_refund_amount = None
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-            case.status = StatusEnum.CLOSED
+            case.status = StatusEnum.TRANSFERRED_TO_BUYER
         db.commit()
         
         if hasattr(email_service, "send_refund_released"):
@@ -348,7 +350,7 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
                 case_id=case.case_id,
                 seller_name=case.seller, seller_email=case.seller_email,
                 buyer_name=case.buyer,   buyer_email=case.buyer_email,
-                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.CLOSED)
+                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.TRANSFERRED_TO_BUYER)
             )
         return HTMLResponse("Refund Approved and Released.")
     
