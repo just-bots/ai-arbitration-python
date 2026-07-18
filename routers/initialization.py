@@ -195,7 +195,7 @@ async def signature_confirm(
     # Validate token
     is_valid, err, party_lower = validators.validate_party_token(case, party, token)
     if not is_valid:
-        return HTMLResponse(err, status_code=403 if "token" in err else 400)
+        return HTMLResponse(err, status_code=403 if err and "token" in err else 400)
         
     # Duplicate/Late-Response Guard
     has_responded, response_val = validators.check_party_already_responded(case, party_lower)
@@ -230,7 +230,7 @@ async def signature_submit(
     # Validate token
     is_valid, err, party_lower = validators.validate_party_token(case, party, token)
     if not is_valid:
-        return HTMLResponse(err, status_code=403 if "token" in err else 400)
+        return HTMLResponse(err, status_code=403 if err and "token" in err else 400)
         
     # Duplicate/Late-Response Guard
     has_responded, _ = validators.check_party_already_responded(case, party_lower)

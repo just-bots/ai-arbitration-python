@@ -196,7 +196,7 @@ async def request_action(
         if withdrawal_eth > 0: case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + int(Decimal(str(withdrawal_eth)) * Decimal(10**18))
         db.commit()
         if hasattr(email_service, "send_refund_requested"):
-            email_service.send_refund_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, case.seller_token)
+            email_service.send_refund_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email)
         msg = "Refund request submitted to Seller."
     elif actionType == "send_payment":
         if not is_buyer: return HTMLResponse("Only buyer can send payment", status_code=403)

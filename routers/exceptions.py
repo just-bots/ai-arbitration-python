@@ -64,7 +64,7 @@ def _send_admin_alert(alert_body: str) -> None:
     try:
         html_body = alert_body.replace('\n', '<br>')
         email_service.send_email(
-            to_email=ADMIN_EMAIL,
+            to=ADMIN_EMAIL,
             subject="🔴 AI Arbitration — Unhandled Exception",
             html_body=f"<div style='font-family:monospace'>{html_body}</div>",
             text_body=alert_body

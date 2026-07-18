@@ -6,6 +6,8 @@ from database import SessionLocal
 from models import Case, StatusEnum
 import email_service
 from gmail_ingestion import process_inbound_emails
+import asyncio
+from blockchain import transfer_funds
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
@@ -54,8 +56,7 @@ def check_transaction_timeouts():
                 print(f"[Scheduler] Cannot auto-approve payment for {case.case_id}: No seller wallet")
                 continue
             
-            import asyncio
-            from blockchain import transfer_funds
+            
             try:
                 if remittance > 0:
                     asyncio.run(transfer_funds(case.seller_wallet, remittance, case.case_id))
@@ -90,8 +91,7 @@ def check_transaction_timeouts():
                 print(f"[Scheduler] Cannot auto-approve refund for {case.case_id}: No buyer wallet")
                 continue
             
-            import asyncio
-            from blockchain import transfer_funds
+            
             try:
                 if remittance > 0:
                     asyncio.run(transfer_funds(case.buyer_wallet, remittance, case.case_id))
@@ -109,8 +109,7 @@ def check_transaction_timeouts():
     finally:
         db.close()
 
-import asyncio
-from blockchain import transfer_funds
+
 
 def hourly_auto_distribute():
     print("[Scheduler] Checking for DISTRIBUTED cases to execute on-chain transfer...")
