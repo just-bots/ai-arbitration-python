@@ -174,7 +174,7 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
                 print(f"Transfer error for buyer: {e}")
                 return HTMLResponse(f"Blockchain Transfer Failed for Buyer: {e}", status_code=500)
         
-        if case.seller_payout == 0 and case.buyer_payout == 0:
+        if int(case.seller_payout or 0) == 0 and int(case.buyer_payout or 0) == 0:
             case.status = StatusEnum.CLOSED_NO_AWARD
         else:
             case.status = StatusEnum.CLOSED

@@ -9,9 +9,11 @@ from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.tools import tool
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 import PyPDF2
+import asyncio
 
 from database import get_db, SessionLocal
 from models import Case, StatusEnum, Message, File
@@ -142,185 +144,189 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
 
     try:
         messages = db.query(Message).filter(Message.case_id == caseId).order_by(Message.time).all()
-    # 1. Prepare Case Packet
-    escrow_fund = int(case.escrow_fund or 0)
-    refund_to_buyer = int(case.refund_to_buyer or 0)
-    payment_to_seller = int(case.payment_to_seller or 0)
+        # 1. Prepare Case Packet
+        escrow_fund = int(case.escrow_fund or 0)
+        refund_to_buyer = int(case.refund_to_buyer or 0)
+        payment_to_seller = int(case.payment_to_seller or 0)
     
-    raw_available = escrow_fund - refund_to_buyer - payment_to_seller
-    escrow_balance = raw_available if raw_available > 0 else 0
+        raw_available = escrow_fund - refund_to_buyer - payment_to_seller
+        escrow_balance = raw_available if raw_available > 0 else 0
     
-    msg_log = "\n\n".join([f"**{m.time.strftime('%Y-%m-%d %H:%M UTC') if m.time else 'Unknown Time'} [{m.sender.value if m.sender else 'Unknown'}]**: {m.content}" for m in messages])
+        msg_log = "\n\n".join([f"**{m.time.strftime('%Y-%m-%d %H:%M UTC') if m.time else 'Unknown Time'} [{m.sender.value if m.sender else 'Unknown'}]**: {m.content}" for m in messages])
     
-    file_table = read_evidence_files(caseId, db)
+        file_table = read_evidence_files(caseId, db)
     
-    signed_time = case.created_at.strftime('%Y-%m-%d %H:%M UTC') if case.created_at else 'No Signing Time'
-    time_now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        signed_time = case.created_at.strftime('%Y-%m-%d %H:%M UTC') if case.created_at else 'No Signing Time'
+        time_now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     
-    user_prompt_text = f"""
-# Case #{case.case_id}  
+        user_prompt_text = f"""
+    # Case #{case.case_id}  
 
-**Current Time:** {time_now}  
-**Contract Signed:** {signed_time}  
+    **Current Time:** {time_now}  
+    **Contract Signed:** {signed_time}  
 
-## Parties: 
-- **Buyer:** {case.buyer} ({case.buyer_email})
-- **Seller:** {case.seller} ({case.seller_email})
+    ## Parties: 
+    - **Buyer:** {case.buyer} ({case.buyer_email})
+    - **Seller:** {case.seller} ({case.seller_email})
 
-## Financials: 
-- **Total Escrow Fund:** {escrow_fund} Wei
-- **Refunded to Buyer:** {refund_to_buyer} Wei
-- **Paid to Seller:** {payment_to_seller} Wei
-- **Escrow Balance:** {escrow_balance} Wei
+    ## Financials: 
+    - **Total Escrow Fund:** {escrow_fund} Wei
+    - **Refunded to Buyer:** {refund_to_buyer} Wei
+    - **Paid to Seller:** {payment_to_seller} Wei
+    - **Escrow Balance:** {escrow_balance} Wei
 
-## Evidence Files: 
-{file_table}
+    ## Evidence Files: 
+    {file_table}
 
-## Messages:
-{msg_log if msg_log else "_No messages submitted._"}
+    ## Messages:
+    {msg_log if msg_log else "_No messages submitted._"}
 
-## Contract Text:
-```
-{case.contract_text or "No contract text provided."}
-```
-"""
-    user_prompt = [{"type": "text", "text": user_prompt_text}]
+    ## Contract Text:
+    ```
+    {case.contract_text or "No contract text provided."}
+    ```
+    """
+        user_prompt = [{"type": "text", "text": user_prompt_text}]
     
-    # Multimodal: append images directly to the user prompt for the Magistrate
-    db_files = db.query(File).filter(File.case_id == caseId).all()
-    for f in db_files:
-        ext = f.original_name.lower().split('.')[-1]
-        if ext in ['jpg', 'jpeg', 'png', 'webp']:
-            import base64
-            file_path = os.path.join(UPLOAD_DIR, f.secure_name)
-            try:
-                with open(file_path, 'rb') as img_file:
-                    b64 = base64.b64encode(img_file.read()).decode('utf-8')
-                    user_prompt.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/{ext};base64,{b64}"}
-                    })
-            except Exception:
-                pass
+        # Multimodal: append images directly to the user prompt for the Magistrate
+        db_files = db.query(File).filter(File.case_id == caseId).all()
+        for f in db_files:
+            ext = f.original_name.lower().split('.')[-1]
+            if ext in ['jpg', 'jpeg', 'png', 'webp']:
+                import base64
+                file_path = os.path.join(UPLOAD_DIR, f.secure_name)
+                try:
+                    with open(file_path, 'rb') as img_file:
+                        b64 = base64.b64encode(img_file.read()).decode('utf-8')
+                        user_prompt.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/{ext};base64,{b64}"}
+                        })
+                except Exception:
+                    pass
 
-    # 2. Setup LangChain Models with Fallbacks
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        # 2. Setup LangChain Models with Fallbacks
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        gemini_api_key = os.environ.get("GEMINI_API_KEY")
     
-    deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
+        deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
     
-    if not openai_api_key:
-        return HTMLResponse(
-            "<h1>AI Setup Required</h1><p>Error: <code>OPENAI_API_KEY</code> environment variable is not set. Please set it in your terminal to run the AI Adjudicator.</p>", 
-            status_code=500
+        if not openai_api_key:
+            return HTMLResponse(
+                "<h1>AI Setup Required</h1><p>Error: <code>OPENAI_API_KEY</code> environment variable is not set. Please set it in your terminal to run the AI Adjudicator.</p>", 
+                status_code=500
+            )
+    
+        # Magistrate LLM (Multimodal, Heavy, Slow)
+        magistrate_primary = ChatOpenAI(model="gpt-4o", temperature=0)
+        magistrate_fallbacks = []
+        if gemini_api_key:
+            magistrate_fallbacks.append(ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0))
+        magistrate_fallbacks.append(ChatOpenAI(model="gpt-4o-mini", temperature=0))
+        magistrate_llm = magistrate_primary.with_fallbacks(magistrate_fallbacks)
+
+        # Final Judge LLM (Text-only, Fast, Efficient)
+        judge_primary = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        judge_fallbacks = []
+        if deepseek_api_key:
+            judge_fallbacks.append(ChatOpenAI(model="deepseek-chat", temperature=0, api_key=deepseek_api_key, base_url="https://api.deepseek.com/v1"))
+        if gemini_api_key:
+            judge_fallbacks.append(ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0))
+        judge_fallbacks.append(ChatOpenAI(model="gpt-3.5-turbo", temperature=0))
+        judge_llm = judge_primary.with_fallbacks(judge_fallbacks)
+    
+        # Create the agent
+        magistrate_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are the AI Magistrate Judge. Investigate the case details, read the contract, use the calculator tool for damage math, and use the external_verification tool if a URL or tracking number needs checking. Summarize your factual findings, including a precise mathematical breakdown of the proposed award."),
+            MessagesPlaceholder(variable_name="input"),
+            ("placeholder", "{agent_scratchpad}")
+        ])
+    
+        agent = create_tool_calling_agent(magistrate_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
+        agent_executor = AgentExecutor(agent=agent, tools=[read_evidence_file, calculator, external_verification], verbose=True)
+    
+        raw_report = (await asyncio.to_thread(agent_executor.invoke, {"input": [HumanMessage(content=user_prompt)]}))["output"]
+        # Extract the structured JSON from the raw report text using the fast judge_llm
+        magistrate_report = await asyncio.to_thread(
+            judge_llm.with_structured_output(MagistrateReport).invoke,
+            f"Extract the magistrate report strictly matching the JSON schema from this text:\n\n{raw_report}"
         )
     
-    # Magistrate LLM (Multimodal, Heavy, Slow)
-    magistrate_primary = ChatOpenAI(model="gpt-4o", temperature=0)
-    magistrate_fallbacks = []
-    if gemini_api_key:
-        magistrate_fallbacks.append(ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0))
-    magistrate_fallbacks.append(ChatOpenAI(model="gpt-4o-mini", temperature=0))
-    magistrate_llm = magistrate_primary.with_fallbacks(magistrate_fallbacks)
-
-    # Final Judge LLM (Text-only, Fast, Efficient)
-    judge_primary = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    judge_fallbacks = []
-    if deepseek_api_key:
-        judge_fallbacks.append(ChatOpenAI(model="deepseek-chat", temperature=0, api_key=deepseek_api_key, base_url="https://api.deepseek.com/v1"))
-    if gemini_api_key:
-        judge_fallbacks.append(ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0))
-    judge_fallbacks.append(ChatOpenAI(model="gpt-3.5-turbo", temperature=0))
-    judge_llm = judge_primary.with_fallbacks(judge_fallbacks)
-    
-    # Create the agent
-    magistrate_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are the AI Magistrate Judge. Investigate the case details, read the contract, use the calculator tool for damage math, and use the external_verification tool if a URL or tracking number needs checking. Summarize your factual findings, including a precise mathematical breakdown of the proposed award."),
-        ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}")
-    ])
-    
-    agent = create_tool_calling_agent(magistrate_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
-    agent_executor = AgentExecutor(agent=agent, tools=[read_evidence_file, calculator, external_verification], verbose=True)
-    
-    raw_report = agent_executor.invoke({"input": user_prompt})["output"]
-    # Extract the structured JSON from the raw report text using the fast judge_llm
-    magistrate_report = judge_llm.with_structured_output(MagistrateReport).invoke(
-        f"Extract the magistrate report strictly matching the JSON schema from this text:\n\n{raw_report}"
-    )
-    
-    # Mathematical Validation of Magistrate Report
-    try:
-        m_buyer_wei = int(magistrate_report.recommended_buyer_payout)
-        m_seller_wei = int(magistrate_report.recommended_seller_payout)
-        if m_buyer_wei + m_seller_wei != escrow_balance:
-            print(f"Magistrate Warning: Awards ({m_buyer_wei} + {m_seller_wei}) != Escrow Balance ({escrow_balance})")
-    except Exception as e:
-        print(f"Magistrate Validation Error: {e}")
+        # Mathematical Validation of Magistrate Report
+        try:
+            m_buyer_wei = int(magistrate_report.recommended_buyer_payout)
+            m_seller_wei = int(magistrate_report.recommended_seller_payout)
+            if m_buyer_wei + m_seller_wei != escrow_balance:
+                print(f"Magistrate Warning: Awards ({m_buyer_wei} + {m_seller_wei}) != Escrow Balance ({escrow_balance})")
+        except Exception as e:
+            print(f"Magistrate Validation Error: {e}")
         
-    # Audit Trail: Persist AI Report
-    os.makedirs("storage/evidence", exist_ok=True)
-    report_path = f"storage/evidence/{case.case_id}_magistrate_report.json"
-    with open(report_path, "w") as rf:
-        rf.write(magistrate_report.model_dump_json(indent=2))
-        
-    # 4. Final Judge Stage
-    final_judge_llm = judge_llm.with_structured_output(FinalRuling)
-    
-    judge_system_prompt = (
-        "You are the Final Judge issuing legally binding rulings in an arbitration system.\n\n"
-        "## AUTHORITY & CONSTRAINTS\n\n"
-        "You may approve, modify, or reject the Magistrate's recommendation. You must:\n"
-        "- Distribute exactly the escrow balance (no more, no less)\n"
-        "- Use non-negative Wei integers only (as strings)\n"
-        "- Justify any deviation from the Magistrate's recommendation\n"
-        "- Base decisions solely on the provided report (no new evidence, no invented facts)\n\n"
-        "## LEGAL PRINCIPLES\n\n"
-        "- Both parties bear equal burden of proof.\n"
-        "- Apply contract law; honor explicit obligations.\n"
-        "- When evidence conflicts, favor documented proof over verbal claims.\n"
-        "- Remain strictly neutral.\n\n"
-        "## REVIEW CHECKLIST\n\n"
-        "1. **Math:** Ensure buyer_payout + seller_payout == escrow_balance.\n"
-        "2. **Evidence:** Confirm reasoning aligns with verified facts and contract terms; weigh contradictions.\n"
-        "3. **Fairness:** Ensure split reflects evidence and contract terms.\n"
-        "4. **Finality:** This is irreversible; your decision executes immediately.\n\n"
-        "## CRITICAL RULES\n\n"
-        "- All payouts must be non-negative Wei integers as strings.\n"
-        "- Sum of buyer_award and seller_award MUST equal escrow_balance exactly.\n"
-        "- All amounts >= 0, no decimals, no rounding.\n"
-        "- Use ONLY the escrow balance provided (no fund creation/destruction).\n"
-        "- No new investigation—rely solely on Magistrate's report.\n"
-        "- Output ONLY valid JSON matching the schema (no extra commentary).\n"
-    )
-    
-    final_ruling = final_judge_llm.invoke([
-        {"role": "system", "content": judge_system_prompt},
-        {"role": "user", "content": f"Escrow Balance Requirement: {escrow_balance} Wei\n\nMagistrate Report:\n{magistrate_report.model_dump_json()}"}
-    ])
-        
-    # 5. Math Validation & Database Update
-    buyer_award_int = int(final_ruling.buyer_award)
-    seller_award_int = int(final_ruling.seller_award)
-    if buyer_award_int + seller_award_int != escrow_balance:
-        raise ValueError(f"Math Error: Awards ({buyer_award_int} + {seller_award_int}) != Escrow Balance ({escrow_balance})")
-        
-        # Commit final ruling to DB (n8n: Record Determination node)
-        # Status becomes DECIDED, Determination Time recorded
-        # NOTE: adjudication_time was already set above when the case was locked
-        case.status = StatusEnum.DECIDED_LOCKED
-        case.determination_time = datetime.now(timezone.utc)
-        case.decision = final_ruling.decision
-        case.buyer_award = buyer_award_int
-        case.seller_award = seller_award_int
-
-        db.commit()
-
-        # Audit Trail: Persist Final Ruling
+        # Audit Trail: Persist AI Report
         os.makedirs("storage/evidence", exist_ok=True)
-        ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
-        with open(ruling_path, "w") as rf:
-            rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
+        report_path = f"storage/evidence/{case.case_id}_magistrate_report.json"
+        with open(report_path, "w") as rf:
+            rf.write(magistrate_report.model_dump_json(indent=2))
+        
+        # 4. Final Judge Stage
+        final_judge_llm = judge_llm.with_structured_output(FinalRuling)
+    
+        judge_system_prompt = (
+            "You are the Final Judge issuing legally binding rulings in an arbitration system.\n\n"
+            "## AUTHORITY & CONSTRAINTS\n\n"
+            "You may approve, modify, or reject the Magistrate's recommendation. You must:\n"
+            "- Distribute exactly the escrow balance (no more, no less)\n"
+            "- Use non-negative Wei integers only (as strings)\n"
+            "- Justify any deviation from the Magistrate's recommendation\n"
+            "- Base decisions solely on the provided report (no new evidence, no invented facts)\n\n"
+            "## LEGAL PRINCIPLES\n\n"
+            "- Both parties bear equal burden of proof.\n"
+            "- Apply contract law; honor explicit obligations.\n"
+            "- When evidence conflicts, favor documented proof over verbal claims.\n"
+            "- Remain strictly neutral.\n\n"
+            "## REVIEW CHECKLIST\n\n"
+            "1. **Math:** Ensure buyer_payout + seller_payout == escrow_balance.\n"
+            "2. **Evidence:** Confirm reasoning aligns with verified facts and contract terms; weigh contradictions.\n"
+            "3. **Fairness:** Ensure split reflects evidence and contract terms.\n"
+            "4. **Finality:** This is irreversible; your decision executes immediately.\n\n"
+            "## CRITICAL RULES\n\n"
+            "- All payouts must be non-negative Wei integers as strings.\n"
+            "- Sum of buyer_award and seller_award MUST equal escrow_balance exactly.\n"
+            "- All amounts >= 0, no decimals, no rounding.\n"
+            "- Use ONLY the escrow balance provided (no fund creation/destruction).\n"
+            "- No new investigation—rely solely on Magistrate's report.\n"
+            "- Output ONLY valid JSON matching the schema (no extra commentary).\n"
+        )
+    
+        final_ruling = await asyncio.to_thread(
+            final_judge_llm.invoke,
+            [
+                {"role": "system", "content": judge_system_prompt},
+                {"role": "user", "content": f"Escrow Balance Requirement: {escrow_balance} Wei\n\nMagistrate Report:\n{magistrate_report.model_dump_json()}"}
+            ]
+        )
+        
+        # 5. Math Validation & Database Update
+        buyer_award_int = int(final_ruling.buyer_award)
+        seller_award_int = int(final_ruling.seller_award)
+        if buyer_award_int + seller_award_int != escrow_balance:
+            raise ValueError(f"Math Error: Awards ({buyer_award_int} + {seller_award_int}) != Escrow Balance ({escrow_balance})")
+        
+            # Commit final ruling to DB (n8n: Record Determination node)
+            # Status becomes DECIDED, Determination Time recorded
+            # NOTE: adjudication_time was already set above when the case was locked
+            case.status = StatusEnum.DECIDED_LOCKED
+            case.determination_time = datetime.now(timezone.utc)
+            case.decision = final_ruling.decision
+            case.buyer_award = buyer_award_int
+            case.seller_award = seller_award_int
+
+            db.commit()
+
+            # Audit Trail: Persist Final Ruling
+            os.makedirs("storage/evidence", exist_ok=True)
+            ruling_path = f"storage/evidence/{case.case_id}_final_ruling.md"
+            with open(ruling_path, "w") as rf:
+                rf.write(f"# Final Ruling for {case.case_id}\n\n**Decision:** {final_ruling.decision}\n\n**Rationale:** {final_ruling.rationale}\n\n**Buyer Award:** {buyer_award_int} Wei\n**Seller Award:** {seller_award_int} Wei\n\n**Confidence:** {final_ruling.confidence}")
             
     except Exception as e:
         print(f"Adjudication Pipeline Failed: {e}")

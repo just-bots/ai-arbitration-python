@@ -47,7 +47,7 @@ async def create_case(
 ):
     """Handles the form submission, saves the file (if any), and inserts into DB."""
 
-    escrow_fund_wei = int(escrow_fund_eth * 1e18)
+    escrow_fund_wei = int(Decimal(str(escrow_fund_eth)) * Decimal(10**18))
 
     # Regex validation for wallet
     if seller_wallet:
