@@ -93,7 +93,7 @@ Each phase maps to one of the five workflow modules:
 **Key design choices:**
 - **PostgreSQL** via Docker replaces Google Sheets as the case ledger
 - **Local `uploads/`** replaces Google Drive for file uploads
-- **LangChain + OpenAI / Gemini / DeepSeek** powers the two-stage AI adjudication, complete with `with_fallbacks()` logic for multi-provider resilience.
+- **LangChain + OpenAI / Gemini / DeepSeek** powers the two-stage AI adjudication. The **Magistrate Judge** uses a heavy, multimodal model (e.g., GPT-4o or Gemini 1.5 Pro) to parse evidence, while the **Final Judge** uses a fast, text-only model (e.g., GPT-4o-mini or Gemini 1.5 Flash) for quick, reliable JSON extraction and ruling logic. Both stages use `with_fallbacks()` for multi-provider resilience.
 - **Agentic Evidence Tooling**: The AI Magistrate runs as a LangChain ReAct agent equipped with a `read_evidence_file` tool to directly parse PDF/TXT evidence.
 - **Gmail IMAP Ingestion**: A built-in IMAP client automatically polls for email replies, extracts Case IDs, hashes attachments, and saves them to the case ledger.
 - **APScheduler**: Manages automated cron jobs for timeouts, evidence window expirations, and Gmail polling.
@@ -307,6 +307,7 @@ http://localhost:8000/transactions/verify?caseId=CASE-...
 **What happens:**
 - The system checks if the deposited amount meets `Escrow Fund + Processing Fee`
 - If sufficient: `deposited_fund` is recorded, `status` stays `SIGNED`
+- If the deposit exceeds the required amount, **Excess Funds** are detected. The buyer receives dedicated links to either **Withdraw Excess** or **Tip the Seller**.
 - The terminal prints the next-step links for both parties:
   ```
   --- EMAIL SIMULATION: FUNDING CONFIRMED ---
@@ -687,7 +688,8 @@ ai-arbitration-python/
 ## Production Deployment Notes
 
 ### 1. Real email sending
-Replace the `print()` statements in each router with an SMTP client or transactional email provider (SendGrid, Mailgun, Postmark). The `exceptions.py` module already has an SMTP stub ready to uncomment.
+Replace the `print()` statements in each router with an SMTP client or transactional email provider (SendGrid, Mailgun, Postmark).
+> **Note:** The global exception handler (`exceptions.py`) is already fully wired to send admin SMTP alerts for unhandled errors and AI adjudication math/schema validation failures, ensuring a zero-trust alert system.
 
 ### 2. Real blockchain integration
 - Set `ETHERSCAN_API_KEY` to enable real deposit scanning via the Etherscan API
@@ -708,8 +710,8 @@ The n8n workflows run adjudication on a **12-hour schedule** and distribution on
 - Add authentication to `/adjudication/run` and `/objection/review`
 
 ### 6. AI model configuration
-The adjudication router uses `gpt-4o` via LangChain by default. To match the original n8n setup:
-- Magistrate Judge → Gemini 2.5 Pro (multimodal) with Google Drive tool access
-- Final Judge → DeepSeek Reasoner (text-only, JSON output mode)
+The adjudication router is already configured with separated models for efficiency:
+- **Magistrate Judge** → `gpt-4o` (multimodal, capable of reading evidence) with fallbacks to `gemini-1.5-pro` and `gpt-4o-mini`.
+- **Final Judge** → `gpt-4o-mini` (text-only, fast, efficient JSON output) with fallbacks to `deepseek-chat`, `gemini-1.5-flash`, and `gpt-3.5-turbo`.
 
 Update the model initialization in `adjudication.py` to use your preferred provider.
