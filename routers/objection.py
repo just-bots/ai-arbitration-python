@@ -94,9 +94,9 @@ async def submit_appeal(
     case.appeal_time = datetime.now(timezone.utc)
     db.commit()
 
-    # Generate combined hash token (n8n design)
-    combined = f"{case.buyer_token}{case.seller_token}".encode()
-    admin_token = hashlib.sha256(combined).hexdigest()
+    # Use secure ADMIN_KEY for admin endpoints
+    from dependencies import ADMIN_KEY
+    admin_token = ADMIN_KEY
     
     # Notify admin that a review is required
     objecting_name = case.buyer if party == RoleEnum.BUYER else case.seller
@@ -122,9 +122,9 @@ async def review_dashboard(request: Request, caseId: str, token: str, db: Sessio
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    expected_token = hashlib.sha256(f"{case.buyer_token}{case.seller_token}".encode()).hexdigest()
-    if not secrets.compare_digest(token, expected_token):
-        return HTMLResponse("Invalid token", status_code=403)
+    from dependencies import ADMIN_KEY
+    if not secrets.compare_digest(token, ADMIN_KEY):
+        return HTMLResponse("Invalid admin key", status_code=403)
         
     # Get the latest appeal message
     appeal_msg = db.query(Message).filter(Message.case_id == caseId, Message.label == LabelEnum.APPEAL).order_by(Message.time.desc()).first()
@@ -143,9 +143,9 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    expected_token = hashlib.sha256(f"{case.buyer_token}{case.seller_token}".encode()).hexdigest()
-    if not secrets.compare_digest(token, expected_token):
-        return HTMLResponse("Invalid token", status_code=403)
+    from dependencies import ADMIN_KEY
+    if not secrets.compare_digest(token, ADMIN_KEY):
+        return HTMLResponse("Invalid admin key", status_code=403)
         
     if action == "uphold":
         # Handle seller and buyer payouts independently for idempotency and atomicity

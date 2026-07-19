@@ -201,39 +201,49 @@ async def request_action(
     elif actionType == "send_payment":
         if not is_buyer: return HTMLResponse("Only buyer can send payment", status_code=403)
         if not case.seller_wallet: return HTMLResponse("No Seller Wallet provided", status_code=400)
-        from blockchain import transfer_funds
-        try:
-            if amount_eth > 0 and case.seller_wallet:
-                await transfer_funds(case.seller_wallet, int(amount_wei), case.case_id)
-        except Exception as e:
-            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+        
+        available = max(0, int(case.escrow_fund or 0) - int(case.payment_to_seller or 0) - int(case.refund_to_buyer or 0))
+        remittance = min(int(amount_wei), available)
+        
+        if remittance > 0:
+            from blockchain import transfer_funds
+            try:
+                if case.seller_wallet:
+                    await transfer_funds(case.seller_wallet, remittance, case.case_id)
+            except Exception as e:
+                return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
-        case.payment_to_seller = int(case.payment_to_seller or 0) + int(amount_wei)
+        case.payment_to_seller = int(case.payment_to_seller or 0) + remittance
         if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(Decimal(str(tip_eth)) * Decimal(10**18))
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-            case.status = StatusEnum.TRANSFERRED_TO_SELLER
+            case.status = StatusEnum.CLOSED
         db.commit()
         if hasattr(email_service, "send_payment_released"):
-            email_service.send_payment_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, amount_eth, closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER))
+            email_service.send_payment_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, remittance / 1e18, closed=(case.status == StatusEnum.CLOSED))
         msg = "Payment successfully sent to Seller."
     elif actionType == "send_refund":
         if not is_seller: return HTMLResponse("Only seller can send refund", status_code=403)
         if not case.buyer_wallet: return HTMLResponse("No Buyer Wallet provided", status_code=400)
-        from blockchain import transfer_funds
-        try:
-            if amount_eth > 0 and case.buyer_wallet:
-                await transfer_funds(case.buyer_wallet, int(amount_wei), case.case_id)
-        except Exception as e:
-            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+        
+        available = max(0, int(case.escrow_fund or 0) - int(case.payment_to_seller or 0) - int(case.refund_to_buyer or 0))
+        remittance = min(int(amount_wei), available)
+        
+        if remittance > 0:
+            from blockchain import transfer_funds
+            try:
+                if case.buyer_wallet:
+                    await transfer_funds(case.buyer_wallet, remittance, case.case_id)
+            except Exception as e:
+                return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
-        case.refund_to_buyer = int(case.refund_to_buyer or 0) + int(amount_wei)
+        case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED
         db.commit()
         if hasattr(email_service, "send_refund_released"):
-            email_service.send_refund_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, amount_eth, closed=(case.status == StatusEnum.CLOSED))
+            email_service.send_refund_released(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, remittance / 1e18, closed=(case.status == StatusEnum.CLOSED))
         msg = "Refund successfully sent to Buyer."
     elif actionType == "withdraw_excess":
         if not is_buyer: return HTMLResponse("Only buyer can withdraw excess", status_code=403)
@@ -299,50 +309,56 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
 
     if actionType == "request_payment" and is_buyer:
         # Buyer approves seller's payment
-        remittance = int(case.requested_payment_amount or 0)
+        requested = int(case.requested_payment_amount or 0)
+        available = max(0, int(case.escrow_fund or 0) - int(case.payment_to_seller or 0) - int(case.refund_to_buyer or 0))
+        remittance = min(requested, available)
+        
         if remittance > 0 and not case.seller_wallet:
             return HTMLResponse("No Seller Wallet provided", status_code=400)
         
-        from blockchain import transfer_funds
-        try:
-            if remittance > 0:
+        if remittance > 0:
+            from blockchain import transfer_funds
+            try:
                 await transfer_funds(case.seller_wallet, remittance, case.case_id)
-        except Exception as e:
-            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            except Exception as e:
+                return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
         case.payment_to_seller = int(case.payment_to_seller or 0) + remittance
         case.payment_request_time = None
         case.requested_payment_amount = None
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-            case.status = StatusEnum.TRANSFERRED_TO_SELLER
+            case.status = StatusEnum.CLOSED
         db.commit()
         email_service.send_payment_released(
             case_id=case.case_id,
             seller_name=case.seller, seller_email=case.seller_email,
             buyer_name=case.buyer,   buyer_email=case.buyer_email,
-            amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER)
+            amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.CLOSED)
         )
         return HTMLResponse("Payment Approved and Released.")
         
     elif actionType == "request_refund" and is_seller:
         # Seller approves buyer's refund
-        remittance = int(case.requested_refund_amount or 0)
+        requested = int(case.requested_refund_amount or 0)
+        available = max(0, int(case.escrow_fund or 0) - int(case.payment_to_seller or 0) - int(case.refund_to_buyer or 0))
+        remittance = min(requested, available)
+        
         if remittance > 0 and not case.buyer_wallet:
             return HTMLResponse("No Buyer Wallet provided", status_code=400)
         
-        from blockchain import transfer_funds
-        try:
-            if remittance > 0:
+        if remittance > 0:
+            from blockchain import transfer_funds
+            try:
                 await transfer_funds(case.buyer_wallet, remittance, case.case_id)
-        except Exception as e:
-            return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
+            except Exception as e:
+                return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
         case.refund_to_buyer = int(case.refund_to_buyer or 0) + remittance
         case.refund_request_time = None
         case.requested_refund_amount = None
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-            case.status = StatusEnum.TRANSFERRED_TO_BUYER
+            case.status = StatusEnum.CLOSED
         db.commit()
         
         if hasattr(email_service, "send_refund_released"):
@@ -350,7 +366,7 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
                 case_id=case.case_id,
                 seller_name=case.seller, seller_email=case.seller_email,
                 buyer_name=case.buyer,   buyer_email=case.buyer_email,
-                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.TRANSFERRED_TO_BUYER)
+                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.CLOSED)
             )
         return HTMLResponse("Refund Approved and Released.")
     

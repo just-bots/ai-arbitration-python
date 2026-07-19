@@ -52,11 +52,13 @@ def check_transaction_timeouts():
         
         for case in payment_cases:
             print(f"[Scheduler] Auto-approving payment for {case.case_id}")
-            remittance = int(case.requested_payment_amount or 0)
+            requested = int(case.requested_payment_amount or 0)
+            available = max(0, int(case.escrow_fund or 0) - int(case.payment_to_seller or 0) - int(case.refund_to_buyer or 0))
+            remittance = min(requested, available)
+            
             if remittance > 0 and not case.seller_wallet:
                 print(f"[Scheduler] Cannot auto-approve payment for {case.case_id}: No seller wallet")
                 continue
-            
             
             try:
                 if remittance > 0:
@@ -69,14 +71,14 @@ def check_transaction_timeouts():
             case.payment_request_time = None
             case.requested_payment_amount = None
             if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-                case.status = StatusEnum.TRANSFERRED_TO_SELLER
+                case.status = StatusEnum.CLOSED
             db.commit()
             
             email_service.send_payment_released(
                 case_id=case.case_id,
                 seller_name=case.seller, seller_email=case.seller_email,
                 buyer_name=case.buyer,   buyer_email=case.buyer_email,
-                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.TRANSFERRED_TO_SELLER)
+                amount_eth=remittance / 1e18, closed=(case.status == StatusEnum.CLOSED)
             )
 
         # Check refund requests
@@ -87,11 +89,13 @@ def check_transaction_timeouts():
         
         for case in refund_cases:
             print(f"[Scheduler] Auto-approving refund for {case.case_id}")
-            remittance = int(case.requested_refund_amount or 0)
+            requested = int(case.requested_refund_amount or 0)
+            available = max(0, int(case.escrow_fund or 0) - int(case.payment_to_seller or 0) - int(case.refund_to_buyer or 0))
+            remittance = min(requested, available)
+            
             if remittance > 0 and not case.buyer_wallet:
                 print(f"[Scheduler] Cannot auto-approve refund for {case.case_id}: No buyer wallet")
                 continue
-            
             
             try:
                 if remittance > 0:
@@ -104,7 +108,7 @@ def check_transaction_timeouts():
             case.refund_request_time = None
             case.requested_refund_amount = None
             if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
-                case.status = StatusEnum.TRANSFERRED_TO_BUYER
+                case.status = StatusEnum.CLOSED
             db.commit()
 
     finally:

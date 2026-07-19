@@ -257,9 +257,21 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
             m_buyer_wei = int(magistrate_report.recommended_buyer_payout)
             m_seller_wei = int(magistrate_report.recommended_seller_payout)
             if m_buyer_wei + m_seller_wei != escrow_balance:
-                print(f"Magistrate Warning: Awards ({m_buyer_wei} + {m_seller_wei}) != Escrow Balance ({escrow_balance})")
+                error_msg = f"Magistrate math failure: Awards ({m_buyer_wei} + {m_seller_wei}) != Escrow Balance ({escrow_balance})"
+                print(error_msg)
+                from routers.exceptions import _send_admin_alert
+                _send_admin_alert(error_msg)
+                case.status = StatusEnum.PROCESSING_LOCKED
+                db.commit()
+                return {"status": "error", "message": error_msg}
         except Exception as e:
-            print(f"Magistrate Validation Error: {e}")
+            error_msg = f"Magistrate Validation Error: {e}"
+            print(error_msg)
+            from routers.exceptions import _send_admin_alert
+            _send_admin_alert(error_msg)
+            case.status = StatusEnum.PROCESSING_LOCKED
+            db.commit()
+            return {"status": "error", "message": error_msg}
         
         # Audit Trail: Persist AI Report
         os.makedirs("storage/evidence", exist_ok=True)
