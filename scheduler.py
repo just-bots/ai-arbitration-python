@@ -10,7 +10,7 @@ import asyncio
 from blockchain import transfer_funds
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
+from dependencies import ADMIN_KEY
 
 def check_disputed_cases():
     print("[Scheduler] Checking for ripe disputed cases (past evidence window)...")

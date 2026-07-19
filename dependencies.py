@@ -3,7 +3,11 @@ import secrets
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader, APIKeyQuery
 
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
+# Generate a fallback if missing so the scheduler can still authenticate
+ADMIN_KEY = os.environ.get("ADMIN_KEY")
+if not ADMIN_KEY:
+    ADMIN_KEY = secrets.token_urlsafe(32)
+    print("WARNING: ADMIN_KEY not set in .env. A secure random fallback has been generated for this session.")
 
 api_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 api_key_query = APIKeyQuery(name="admin_key", auto_error=False)
