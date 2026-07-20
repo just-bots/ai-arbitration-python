@@ -2,7 +2,7 @@ import hashlib
 import os
 import secrets
 import uuid
-import re
+
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -48,8 +48,10 @@ async def create_case(
 ):
     """Handles the form submission, saves the file (if any), and inserts into DB."""
 
+    if escrow_fund_eth <= 0:
+        return HTMLResponse("Escrow fund must be strictly positive.", status_code=400)
+    
     escrow_fund_wei = int(Decimal(str(escrow_fund_eth)) * Decimal(10**18))
-
     # Regex validation for wallet
     if seller_wallet:
         is_valid, err = validators.validate_ethereum_address(seller_wallet)
@@ -71,6 +73,9 @@ async def create_case(
     file_path       = None
 
     if contract_file and contract_file.filename:
+        is_valid, err = validators.validate_file_upload(contract_file.filename, contract_file.size, contract_file.content_type)
+        if not is_valid: return HTMLResponse(err, status_code=400)
+        
         file_content    = await contract_file.read()
         file_hash       = hashlib.sha256(file_content).hexdigest()
         original_name   = contract_file.filename
