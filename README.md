@@ -680,7 +680,22 @@ ai-arbitration-python/
 ├── storage/
 │   └── evidence/              # Uploaded evidence files (SHA-256 hashed)
 │
+├── test_initialization.py       # Security test suite for case creation
+├── test_transactions.py         # Security test suite for financial logic
+├── test_prosecution.py          # Security test suite for evidence flows
 └── uploads/                   # Contract PDF uploads
+
+---
+
+## Security & Validation (Zero-Trust Model)
+
+This implementation has undergone a comprehensive zero-trust security audit to harden the arbitration pipeline against manipulation and denial-of-service (DoS) attacks:
+
+- **Strict File Upload Validation**: Case creation and evidence uploads enforce strict 10MB limits via chunked stream tracking (preventing `Content-Length` bypass DoS attacks) and restrict uploads to safe MIME types (PDF, TXT, DOC). Filenames are sanitized against path traversal (`os.path.basename`).
+- **Mathematical Clamping**: Escrow funds must be strictly positive at creation. All payouts and refunds are dynamically clamped to `min(requested_amount, available_escrow)` to eliminate integer overflow or fund leakage exploits.
+- **Accounting Isolation**: Tip and withdrawal requests are completely isolated from general payment requests, preventing "Ghost Tip" attacks where a malicious party could artificially drain the opponent's excess ledger balance without transferring actual ETH.
+- **State Machine Enforcement**: Endpoints like `/dispute` and `/escalate` enforce strict pre-requisite state checks (e.g., must be `EFFECTIVE` or `SIGNED`), preventing attackers from resurrecting `CLOSED` cases or escalating unfunded cases to exhaust AI API quotas.
+- **Complete Test Coverage**: Security logic is continuously verified by isolated `pytest` suites (`test_initialization.py`, `test_transactions.py`, `test_prosecution.py`), preventing regressions.
 ```
 
 ---
