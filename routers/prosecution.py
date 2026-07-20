@@ -87,13 +87,21 @@ async def post_evidence(
         if not is_valid:
             return HTMLResponse(f"File upload error: {err}", status_code=400)
             
-        secure_filename = f"{uuid.uuid4()}_{upload.filename}"
+        # Strip path traversal characters
+        safe_filename = os.path.basename(upload.filename)
+        secure_filename = f"{uuid.uuid4()}_{safe_filename}"
         file_path = os.path.join(STORAGE_DIR, secure_filename)
         
-        # Read file, write to disk, and calculate hash
+        # Read file, write to disk, calculate hash, and enforce max size manually
         sha256_hash = hashlib.sha256()
+        bytes_written = 0
         with open(file_path, "wb") as buffer:
             while chunk := upload.file.read(8192):
+                bytes_written += len(chunk)
+                if bytes_written > validators.MAX_FILE_SIZE:
+                    buffer.close()
+                    os.remove(file_path)
+                    return HTMLResponse(f"File upload error: File {safe_filename} is too large.", status_code=400)
                 sha256_hash.update(chunk)
                 buffer.write(chunk)
                 
@@ -143,8 +151,8 @@ async def escalate_to_adjudication(
     if not case:
         return HTMLResponse("Case not found", status_code=404)
 
-    if case.status not in [StatusEnum.PENDING, StatusEnum.SIGNED, StatusEnum.EFFECTIVE]:
-        return HTMLResponse(f"Cannot escalate. Case is currently in {case.status.value} status.", status_code=400)
+    if case.status != StatusEnum.EFFECTIVE:
+        return HTMLResponse(f"Cannot escalate. Case must be in EFFECTIVE status (funds deposited), currently in {case.status.value}.", status_code=400)
 
     is_seller, _, _ = validators.validate_party_token(case, "seller", token)
     is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)

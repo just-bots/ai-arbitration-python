@@ -184,7 +184,6 @@ async def request_action(
         if not is_seller: return HTMLResponse("Only seller can request payment", status_code=403)
         case.payment_request_time = datetime.now(timezone.utc)
         case.requested_payment_amount = amount_wei
-        if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(Decimal(str(tip_eth)) * Decimal(10**18))
         db.commit()
         if hasattr(email_service, "send_payment_requested"):
             email_service.send_payment_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email, case.buyer_token)
@@ -193,7 +192,6 @@ async def request_action(
         if not is_buyer: return HTMLResponse("Only buyer can request refund", status_code=403)
         case.refund_request_time = datetime.now(timezone.utc)
         case.requested_refund_amount = amount_wei
-        if withdrawal_eth > 0: case.buyer_withdrawal = int(case.buyer_withdrawal or 0) + int(Decimal(str(withdrawal_eth)) * Decimal(10**18))
         db.commit()
         if hasattr(email_service, "send_refund_requested"):
             email_service.send_refund_requested(case.case_id, case.seller, case.seller_email, case.buyer, case.buyer_email)
@@ -214,7 +212,6 @@ async def request_action(
                 return HTMLResponse(f"Blockchain Transfer Failed: {e}", status_code=500)
             
         case.payment_to_seller = int(case.payment_to_seller or 0) + remittance
-        if tip_eth > 0: case.tip_to_seller = int(case.tip_to_seller or 0) + int(Decimal(str(tip_eth)) * Decimal(10**18))
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED
@@ -388,6 +385,9 @@ async def dispute_transaction(request: Request, caseId: str = Form(...), token: 
     is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     if not is_buyer and not is_seller:
         return HTMLResponse("Invalid token", status_code=403)
+        
+    if case.status not in [StatusEnum.EFFECTIVE, StatusEnum.SIGNED]:
+        return HTMLResponse(f"Cannot dispute. Case is currently in {case.status.value} status.", status_code=400)
 
     case.status = StatusEnum.DISPUTED
     case.dispute_time = datetime.now(timezone.utc)
