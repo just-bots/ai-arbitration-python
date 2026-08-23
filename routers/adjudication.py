@@ -361,6 +361,7 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
 
     **Current Time:** {time_now}  
     **Contract Signed:** {signed_time}  
+    **Governing Law / Jurisdiction:** {case.governing_law or 'US-Commercial (Default)'}
 
     ## Parties: 
     - **Buyer:** {case.buyer} ({case.buyer_email})
@@ -544,6 +545,8 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         case.status = StatusEnum.DECIDED_LOCKED
         case.determination_time = datetime.now(timezone.utc)
         case.decision = final_ruling.decision
+        case.rationale = final_ruling.rationale
+        case.magistrate_report_json = magistrate_report.model_dump_json(indent=2)
         case.buyer_award = buyer_award_int
         case.seller_award = seller_award_int
 
