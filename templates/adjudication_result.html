@@ -29,6 +29,15 @@
             {% endfor %}
         </ul>
         {% endif %}
+
+        {% if magistrate.applicable_legal_authorities %}
+        <h4 style="margin-top: 1rem; color: #1e40af;">Governing Legal Authorities & Statutes:</h4>
+        <ul style="padding-left: 1.5rem; color: #1e3a8a;">
+            {% for authority in magistrate.applicable_legal_authorities %}
+            <li><strong>{{ authority }}</strong></li>
+            {% endfor %}
+        </ul>
+        {% endif %}
     </div>
 
     <!-- Final Ruling Section -->

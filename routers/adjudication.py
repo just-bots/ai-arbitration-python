@@ -26,7 +26,8 @@ class MagistrateReport(BaseModel):
     facts: list[str] = Field(description="Array of verified facts (each with evidence citation)")
     contradictions: list[str] = Field(description="Array of conflicts between claims/evidence or between parties")
     unsubstantiated_claims: list[str] = Field(description="Array of claims lacking evidence")
-    reasoning: str = Field(description="Explanation of how facts support your payout recommendation")
+    applicable_legal_authorities: list[str] = Field(default_factory=list, description="Array of cited statutory sections, precedents, or legal rules applied (from retrieve_legal_authorities tool)")
+    reasoning: str = Field(description="Explanation of how facts and legal principles support your payout recommendation")
     recommended_buyer_payout: str = Field(description="Wei string (must sum with seller payout to escrow_balance)")
     recommended_seller_payout: str = Field(description="Wei string (must sum with buyer payout to escrow_balance)")
 
@@ -124,6 +125,202 @@ def external_verification(url: str) -> str:
         return resp.text[:2000]
     except Exception as e:
         return f"Fetch error: {e}"
+
+_legal_embeddings = None
+
+def get_legal_embeddings():
+    global _legal_embeddings
+    if _legal_embeddings is None:
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+        except ImportError:
+            raise ImportError(
+                "langchain-huggingface or sentence-transformers is not installed. "
+                "Please run `pip install -r requirements.txt`"
+            )
+        model_name = os.getenv("LEGAL_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        _legal_embeddings = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True, "batch_size": 32}
+        )
+    return _legal_embeddings
+
+def hybrid_search_legal_knowledge(
+    query: str,
+    jurisdiction: str = None,
+    authority_types: list[str] = None,
+    top_k: int = 5,
+    candidate_k: int = 20,
+    rrf_k: int = 60,
+) -> list[dict]:
+    """Executes Reciprocal Rank Fusion (RRF) combining vector cosine distance and TSVector keyword search."""
+    import psycopg
+    from pgvector.psycopg import register_vector
+    import numpy as np
+
+    embeddings = get_legal_embeddings()
+    embedding_model_name = os.getenv("LEGAL_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    query_embedding = np.asarray(embeddings.embed_query(query), dtype=np.float32)
+
+    conditions = [
+        "is_current = TRUE",
+        "embedding_model = %(embedding_model)s",
+    ]
+    params = {
+        "query": query,
+        "embedding": query_embedding,
+        "embedding_model": embedding_model_name,
+        "candidate_k": candidate_k,
+        "top_k": top_k,
+        "rrf_k": rrf_k,
+    }
+
+    if jurisdiction and jurisdiction.strip():
+        conditions.append("LOWER(jurisdiction) = LOWER(%(jurisdiction)s)")
+        params["jurisdiction"] = jurisdiction.strip()
+
+    if authority_types:
+        conditions.append("authority_type = ANY(%(authority_types)s::text[])")
+        params["authority_types"] = authority_types
+
+    where_clause = " AND ".join(conditions)
+
+    sql = f"""
+    WITH semantic_search AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> %(embedding)s) AS semantic_rank
+        FROM legal_knowledge
+        WHERE {where_clause}
+        ORDER BY embedding <=> %(embedding)s
+        LIMIT %(candidate_k)s
+    ),
+    keyword_search AS (
+        SELECT id, ROW_NUMBER() OVER (
+            ORDER BY ts_rank_cd(search_tsv, websearch_to_tsquery('english', %(query)s)) DESC
+        ) AS keyword_rank
+        FROM legal_knowledge
+        WHERE {where_clause}
+          AND search_tsv @@ websearch_to_tsquery('english', %(query)s)
+        ORDER BY ts_rank_cd(search_tsv, websearch_to_tsquery('english', %(query)s)) DESC
+        LIMIT %(candidate_k)s
+    ),
+    fused AS (
+        SELECT
+            COALESCE(s.id, k.id) AS id,
+            COALESCE(1.0 / (%(rrf_k)s + s.semantic_rank), 0.0) +
+            COALESCE(1.0 / (%(rrf_k)s + k.keyword_rank), 0.0) AS rrf_score
+        FROM semantic_search s
+        FULL OUTER JOIN keyword_search k ON s.id = k.id
+    )
+    SELECT
+        lk.id,
+        lk.document_id,
+        lk.authority_type,
+        lk.title,
+        lk.citation,
+        lk.jurisdiction,
+        lk.court,
+        lk.precedential,
+        lk.status,
+        lk.decision_date,
+        lk.effective_from,
+        lk.effective_to,
+        lk.section_label,
+        lk.source_url,
+        lk.chunk_index,
+        lk.content,
+        f.rrf_score
+    FROM fused f
+    JOIN legal_knowledge lk ON lk.id = f.id
+    ORDER BY f.rrf_score DESC
+    LIMIT %(top_k)s;
+    """
+
+    db_url = os.getenv("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/arbitration")
+    with psycopg.connect(db_url) as conn:
+        register_vector(conn)
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            columns = [desc.name for desc in cur.description]
+            rows = cur.fetchall()
+
+    return [dict(zip(columns, row)) for row in rows]
+
+
+@tool
+def search_legal_authorities(query: str, jurisdiction: str = "", top_k: int = 5) -> str:
+    """Searches statutes, UCC provisions, commercial regulations, contract law rules, and legal precedents using Hybrid RRF (Vector + Keyword).
+    Use this to research applicable legal standards, breach of contract remedies, perfect tender rules, and warranty claims.
+    Do not invent legal citations. Cite only authorities returned by this tool or fetch_legal_authority."""
+    try:
+        try:
+            import psycopg
+            from pgvector.psycopg import register_vector
+        except ImportError:
+            return "Legal database vector search unavailable: pgvector/psycopg not installed."
+
+        results = hybrid_search_legal_knowledge(
+            query=query,
+            jurisdiction=jurisdiction if jurisdiction and jurisdiction.strip() else None,
+            top_k=top_k
+        )
+
+        if not results:
+            return "No matching legal authorities or statutes found in database."
+
+        formatted = []
+        for item in results:
+            cite_str = f" ({item.get('citation')})" if item.get('citation') else ""
+            sec_str = f" [{item.get('section_label')}]" if item.get('section_label') else ""
+            formatted.append(
+                f"### {item.get('title')}{cite_str}{sec_str}\n"
+                f"**Document ID:** `{item.get('document_id')}` | **Jurisdiction:** {item.get('jurisdiction')} | **Authority:** {item.get('authority_type')} | **RRF Score:** {float(item.get('rrf_score', 0)):.4f}\n"
+                f"**Statute / Case Excerpt:**\n{item.get('content')}"
+            )
+        return "\n\n---\n\n".join(formatted)
+    except Exception as e:
+        return f"Legal search error: {e}"
+
+
+@tool
+def fetch_legal_authority(document_id: str) -> str:
+    """Fetches the complete statutory or judicial text across all chunks for a specific document_id returned by search_legal_authorities.
+    Use this when a retrieved passage is insufficient and you need to inspect full surrounding context, exceptions, or definitions."""
+    db_url = os.getenv("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/arbitration")
+    try:
+        try:
+            import psycopg
+        except ImportError:
+            return "Legal database search unavailable: psycopg not installed."
+
+        sql = """
+        SELECT chunk_index, section_label, content, title, citation, jurisdiction, court, source_url
+        FROM legal_knowledge
+        WHERE document_id = %(document_id)s
+          AND is_current = TRUE
+        ORDER BY chunk_index ASC;
+        """
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"document_id": document_id.strip()})
+                rows = cur.fetchall()
+
+        if not rows:
+            return f"Legal authority '{document_id}' not found in database."
+
+        first = rows[0]
+        title, citation, jurisdiction, court, source_url = first[3], first[4], first[5], first[6], first[7]
+        cite_str = f" ({citation})" if citation else ""
+        header = f"# {title}{cite_str}\n**Document ID:** `{document_id}` | **Jurisdiction:** {jurisdiction} | **Court/Source:** {court or source_url or 'Authoritative'}\n"
+        
+        chunks_text = []
+        for r in rows:
+            sec_header = f"### Section: {r[1]}" if r[1] else f"### Chunk [{r[0]}]"
+            chunks_text.append(f"{sec_header}\n{r[2]}")
+
+        return header + "\n\n" + "\n\n".join(chunks_text)
+    except Exception as e:
+        return f"Error fetching legal authority: {e}"
 
 @router.post("/run", response_class=HTMLResponse)
 async def run_adjudication(request: Request, caseId: str = Form(...), db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
@@ -237,13 +434,31 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     
         # Create the agent
         magistrate_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are the AI Magistrate Judge. Investigate the case details, read the contract, use the calculator tool for damage math, and use the external_verification tool if a URL or tracking number needs checking. Summarize your factual findings, including a precise mathematical breakdown of the proposed award."),
+            ("system", 
+             "You are the AI Magistrate Judge in a two-stage arbitration system. Investigate the case details, analyze evidence, and prepare a neutral, evidence-grounded report for the Final Judge.\n\n"
+             "LEGAL RESEARCH RULES:\n"
+             "- Use 'search_legal_authorities' to research applicable commercial law, UCC statutes, regulations, or precedents.\n"
+             "- When an excerpt is insufficient, use 'fetch_legal_authority' to inspect the full statutory text or exceptions.\n"
+             "- Do not rely on unverified memory for legal citations; cite only authorities returned by your tools.\n"
+             "- Never invent citations, statutes, or holdings.\n\n"
+             "CASE ANALYSIS & MATH RULES:\n"
+             "- Use 'read_evidence_file' to examine uploaded evidence and 'external_verification' for URLs/tracking.\n"
+             "- Use 'calculator' for exact damage award math.\n"
+             "- Distinguish agreed facts, disputed facts, and unsupported claims.\n"
+             "- Provide a factual summary, cite governing legal authorities, and calculate the exact proposed Wei payouts (must sum to escrow_balance)."),
             MessagesPlaceholder(variable_name="input"),
             ("placeholder", "{agent_scratchpad}")
         ])
     
-        agent = create_tool_calling_agent(magistrate_llm, [read_evidence_file, calculator, external_verification], magistrate_prompt)
-        agent_executor = AgentExecutor(agent=agent, tools=[read_evidence_file, calculator, external_verification], verbose=True)
+        magistrate_tools = [
+            read_evidence_file,
+            calculator,
+            external_verification,
+            search_legal_authorities,
+            fetch_legal_authority,
+        ]
+        agent = create_tool_calling_agent(magistrate_llm, magistrate_tools, magistrate_prompt)
+        agent_executor = AgentExecutor(agent=agent, tools=magistrate_tools, verbose=True)
     
         raw_report = (await asyncio.to_thread(agent_executor.invoke, {"input": [HumanMessage(content=user_prompt)]}))["output"]
         # Extract the structured JSON from the raw report text using the fast judge_llm

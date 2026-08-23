@@ -1,0 +1,19 @@
+{
+  "sources": [
+    {
+      "document_id": "UCC-ARTICLE-2-SALES",
+      "authority_type": "statute",
+      "title": "Uniform Commercial Code - Article 2 (Sales)",
+      "citation": "UCC § 2-601 et seq.",
+      "jurisdiction": "US-Commercial",
+      "court": null,
+      "publisher": "Uniform Law Commission",
+      "precedential": true,
+      "status": "active",
+      "decision_date": null,
+      "effective_from": "1951-01-01",
+      "effective_to": null,
+      "source_file": "data/legal_docs/sample_arbitration_rules.md"
+    }
+  ]
+}
