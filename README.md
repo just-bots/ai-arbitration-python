@@ -1,6 +1,5 @@
 # AI Arbitration Platform — Python Edition
 
-> A full Python/FastAPI port of the [n8n AI Arbitration Platform](https://github.com/just-bots/ai-arbitration-n8n).  
 > Automated contract arbitration backed by PostgreSQL, LangChain AI agents, and Ethereum escrow.
 
 ---
@@ -45,12 +44,12 @@ This repository is a **Python/FastAPI** implementation that mirrors the logic of
 │                        ARBITRATION LIFECYCLE                        │
 ├──────────┬──────────────────────────────────────────────────────────┤
 │ Phase 1  │ Contract submitted → Case ID generated → Emails sent     │
-│ Phase 2  │ Both parties accept contract + register ETH wallets       │
-│ Phase 3  │ Buyer deposits escrow to on-chain wallet → Verified       │
-│ Phase 4  │ Seller requests payment OR Buyer requests refund          │
-│ Phase 5  │ Opposing party disputes → Evidence window opens (7 days)  │
-│ Phase 6  │ AI Magistrate investigates → AI Final Judge rules         │
-│ Phase 7  │ 7-day objection window → Award distributed on-chain       │
+│ Phase 2  │ Both parties accept contract + register ETH wallets      │
+│ Phase 3  │ Buyer deposits escrow to on-chain wallet → Verified      │
+│ Phase 4  │ Seller requests payment OR Buyer requests refund         │
+│ Phase 5  │ Opposing party disputes → Evidence window opens (7 days) │
+│ Phase 6  │ AI Magistrate investigates → AI Final Judge rules        │
+│ Phase 7  │ 7-day objection window → Award distributed on-chain      │
 └──────────┴──────────────────────────────────────────────────────────┘
 ```
 
@@ -71,16 +70,16 @@ Each phase maps to one of the five workflow modules:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     FastAPI Application                  │
+│                     FastAPI Application                 │
 │                                                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
-│  │  Routes  │  │ Templates│  │  Static  │             │
-│  │ (6 mods) │  │ (Jinja2) │  │  (CSS)   │             │
-│  └────┬─────┘  └──────────┘  └──────────┘             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
+│  │  Routes  │  │ Templates│  │  Static  │               │
+│  │ (6 mods) │  │ (Jinja2) │  │  (CSS)   │               │
+│  └────┬─────┘  └──────────┘  └──────────┘               │
 │       │                                                 │
-│  ┌────▼──────────────────────────────────────────┐     │
-│  │           SQLAlchemy ORM (models.py)           │     │
-│  └────┬──────────────────────────────────────────┘     │
+│  ┌────▼──────────────────────────────────────────┐      │
+│  │           SQLAlchemy ORM (models.py)          │      │
+│  └────┬──────────────────────────────────────────┘      │
 │       │                                                 │
 └───────┼─────────────────────────────────────────────────┘
         │
