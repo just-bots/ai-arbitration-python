@@ -84,17 +84,26 @@ Each phase maps to one of the five workflow modules:
 │       │                                                 │
 └───────┼─────────────────────────────────────────────────┘
         │
-┌───────▼──────────┐    ┌──────────────────────────────┐
-│   PostgreSQL DB   │    │    External Services (mock)   │
-│  (Docker :5433)  │    │  Etherscan · Tatum · OpenAI  │
-└──────────────────┘    └──────────────────────────────┘
+┌───────▼─────────────────────────────────────────────────┐
+│         PostgreSQL + pgvector Database (Docker :5433)   │
+│  ┌─────────────────────────┐  ┌──────────────────────┐  │
+│  │   Case & Ledger Tables  │  │   legal_knowledge    │  │
+│  │  (cases, messages, etc) │  │ (pgvector HNSW + FTS)│  │
+│  └─────────────────────────┘  └──────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 **Key design choices:**
-- **PostgreSQL** via Docker replaces Google Sheets as the case ledger
-- **Local `uploads/`** replaces Google Drive for file uploads
-- **LangChain + OpenAI / Gemini / DeepSeek** powers the two-stage AI adjudication. The **Magistrate Judge** uses a heavy, multimodal model (e.g., GPT-4o or Gemini 1.5 Pro) to parse evidence, while the **Final Judge** uses a fast, text-only model (e.g., GPT-4o-mini or Gemini 1.5 Flash) for quick, reliable JSON extraction and ruling logic. Both stages use `with_fallbacks()` for multi-provider resilience.
-- **Agentic Evidence Tooling**: The AI Magistrate runs as a LangChain ReAct agent equipped with a `read_evidence_file` tool to directly parse PDF/TXT evidence.
+- **PostgreSQL + `pgvector`** via Docker acts as the immutable case ledger and high-performance vector database (`VECTOR(384)` with HNSW cosine index + GIN English full-text search index).
+- **Legal ETL Ingestion Pipeline (`legal_etl.py`)**: Ingests authoritative statutes (e.g., UCC), commercial regulations, and dispute precedents with statutory section tagging (`§`, `ARTICLE`, `SECTION`), semantic embeddings, and non-destructive versioning (`is_current = FALSE` deprecation).
+- **Agentic RAG Adjudication**: The **Magistrate Judge** runs as an AI RAG agent equipped with a 5-tool toolbelt:
+  1. `search_legal_authorities` — Hybrid search using **Reciprocal Rank Fusion (RRF)** combining pgvector cosine similarity and PostgreSQL full-text search.
+  2. `fetch_legal_authority` — Context expansion to pull the full sequential text for a statute or case.
+  3. `read_evidence_file` — Directly extracts text and tables from PDF/TXT party evidence.
+  4. `calculator` — Evaluates deterministic Wei mathematical awards and damage splits.
+  5. `external_verification` — Verifies public URLs, tracking numbers, or pricing benchmarks.
+- **Two-Stage Multi-Provider Resilience**: Heavy multimodal model for Magistrate investigation (`gpt-4o`, `gemini-1.5-pro`) and fast model for Final Judge ruling (`gpt-4o-mini`, `gemini-1.5-flash`, `deepseek-chat`) with automatic `with_fallbacks()`.
+- **Zero-Trust Financial Enforcement**: Payouts are mathematically validated (`buyer_award + seller_award == escrow_balance`) before recording to the database.
 - **Gmail IMAP Ingestion**: A built-in IMAP client automatically polls for email replies, extracts Case IDs, hashes attachments, and saves them to the case ledger.
 - **APScheduler**: Manages automated cron jobs for timeouts, evidence window expirations, and Gmail polling.
 - **Blockchain verified**: Actual Etherscan API validation replaces mock deposits.
@@ -148,18 +157,18 @@ DATABASE_URL=postgresql://postgres:password@localhost:5433/arbitration
 
 See [Environment Variables](#environment-variables) for the full list.
 
-### Step 3 — Start the database
+### Step 3 — Start the database (with pgvector)
 
 ```bash
 docker-compose up -d
 ```
 
-This starts a PostgreSQL 15 container named `arbitration-db` on port **5433**.  
+This starts a `pgvector/pgvector:pg15` container named `arbitration-db` on port **5433**.  
 To verify it's running:
 
 ```bash
 docker ps
-# You should see: arbitration-db   postgres:15   Up ...   0.0.0.0:5433->5432/tcp
+# You should see: arbitration-db   pgvector/pgvector:pg15   Up ...   0.0.0.0:5433->5432/tcp
 ```
 
 ### Step 4 — Install Python dependencies
@@ -170,18 +179,24 @@ pip install -r requirements.txt
 
 > If you're on macOS and get a `psycopg2` error, try: `pip install psycopg2-binary`
 
-### Step 5 — Initialize the database schema
+### Step 5 — Initialize Schema & Ingest Legal Knowledge
 
+1. Create the case ledger tables:
 ```bash
 python create_tables.py
 ```
 
-Expected output:
-```
-Database schema created successfully.
+2. Ingest governing commercial codes, UCC statutes, and dispute precedents into pgvector:
+```bash
+python legal_etl.py legal_sources.json
 ```
 
-This creates three tables: `cases`, `messages`, and `files`.
+Expected output:
+```
+[legal-etl] Ingesting UCC-ARTICLE-2-SALES...
+[legal-etl] Generating embeddings for 6 chunks...
+[legal-etl] Successfully inserted 6 chunks for: UCC-ARTICLE-2-SALES
+```
 
 ### Step 6 — (Optional) Inspect the database
 
@@ -403,12 +418,20 @@ Or visit `/docs` and use the Swagger UI.
 
 The AI adjudication is a two-stage process:
 
-#### Stage 1: Magistrate Judge
-Investigates the case impartially — reads all messages, evidence files, and the contract. Produces a structured report with:
-- Verified facts (each citing its source)
-- Contradictions between parties
-- Unsubstantiated claims
-- Recommended payout split (in Wei)
+#### Stage 1: Magistrate Judge (RAG Agent)
+Investigates the case impartially as a tool-calling RAG agent equipped with a 5-tool toolbelt:
+- `search_legal_authorities` — RRF hybrid search (pgvector cosine distance + PostgreSQL tsvector lexical match)
+- `fetch_legal_authority` — Context expansion to inspect complete statutory articles and exceptions
+- `read_evidence_file` — Reads party-submitted PDF and text files
+- `calculator` — Deterministic mathematical award calculations
+- `external_verification` — Fetches URLs for tracking or pricing verification
+
+Produces a structured `MagistrateReport` with:
+- Neutral summary and timeline
+- Verified facts (each citing specific evidence)
+- Contradictions and unsubstantiated claims
+- Applicable governing legal authorities (`applicable_legal_authorities`)
+- Recommended payout split in Wei (`recommended_buyer_payout`, `recommended_seller_payout`)
 
 #### Stage 2: Final Judge
 Reviews the Magistrate's report and issues a **legally binding ruling** with:
@@ -648,7 +671,11 @@ ai-arbitration-python/
 ├── models.py                  # SQLAlchemy ORM models (Case, Message, File)
 ├── database.py                # DB session factory
 ├── create_tables.py           # One-time schema initializer
-├── docker-compose.yml         # PostgreSQL container
+├── legal_etl.py               # Legal knowledge ETL pipeline for pgvector
+├── legal_sources.json         # Authoritative legal sources manifest
+├── data/
+│   └── legal_docs/            # Local statutory and arbitration markdown sources
+├── docker-compose.yml         # PostgreSQL + pgvector container
 ├── requirements.txt           # Python dependencies
 ├── .env.example               # Environment variable template
 │
@@ -680,6 +707,8 @@ ai-arbitration-python/
 ├── storage/
 │   └── evidence/              # Uploaded evidence files (SHA-256 hashed)
 │
+├── test_critical.py             # Escrow clamping and financial invariant tests
+├── test_legal_rag.py            # Legal RAG hybrid search & ETL unit tests
 ├── test_initialization.py       # Security test suite for case creation
 ├── test_transactions.py         # Security test suite for financial logic
 ├── test_prosecution.py          # Security test suite for evidence flows
