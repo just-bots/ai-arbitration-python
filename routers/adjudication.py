@@ -21,7 +21,7 @@ from dependencies import verify_admin_token
 import email_service
 
 # Pydantic models for LangChain structured output
-class MagistrateReport(BaseModel):
+class MagistrateReport(BaseModel): 
     summary: str = Field(description="Neutral overview of dispute and timeline")
     facts: list[str] = Field(description="Array of verified facts (each with evidence citation)")
     contradictions: list[str] = Field(description="Array of conflicts between claims/evidence or between parties")
@@ -31,7 +31,7 @@ class MagistrateReport(BaseModel):
     recommended_buyer_payout: str = Field(description="Wei string (must sum with seller payout to escrow_balance)")
     recommended_seller_payout: str = Field(description="Wei string (must sum with buyer payout to escrow_balance)")
 
-class FinalRuling(BaseModel):
+class FinalRuling(BaseModel): 
     decision: str = Field(description="The final binding ruling description")
     escrow_balance: str = Field(description="The total escrow balance in Wei")
     buyer_award: str = Field(description="Amount awarded to the buyer in Wei (string format)")
@@ -39,11 +39,10 @@ class FinalRuling(BaseModel):
     rationale: str = Field(description="Detailed rationale for the final ruling")
     confidence: float = Field(description="AI Confidence score between 0.0 and 1.0")
 
-
 router = APIRouter(prefix="/adjudication", tags=["Adjudication"])
 templates = Jinja2Templates(directory="templates")
 
-def read_evidence_files(case_id: str, db: Session):
+def read_evidence_files(case_id: str, db: Session): 
     """Summarizes uploaded evidence files for the AI context."""
     files = db.query(File).filter(File.case_id == case_id).all()
     if not files:
@@ -119,10 +118,10 @@ def external_verification(url: str) -> str:
     Use this to verify tracking numbers, public pricing, or reference data."""
     try:
         resp = httpx.get(url, timeout=10.0, follow_redirects=True)
-        if resp.status_code != 200:
-            return f"Error: HTTP {resp.status_code}"
-        # Return first 2000 chars of text to avoid context overload
-        return resp.text[:2000]
+        if resp.status_code == 200: 
+            # Return first 2000 chars of text to avoid context overload
+            return resp.text[:2000]
+        return f"Error: HTTP {resp.status_code}"
     except Exception as e:
         return f"Fetch error: {e}"
 
