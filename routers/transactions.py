@@ -325,6 +325,8 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
         case.requested_payment_amount = None
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED
+        else:
+            case.status = StatusEnum.EFFECTIVE
         db.commit()
         email_service.send_payment_released(
             case_id=case.case_id,
@@ -356,6 +358,8 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
             
         if (int(case.payment_to_seller or 0) + int(case.refund_to_buyer or 0)) >= int(case.escrow_fund or 0):
             case.status = StatusEnum.CLOSED
+        else:
+            case.status = StatusEnum.EFFECTIVE
         db.commit()
         
         if hasattr(email_service, "send_refund_released"):
@@ -368,31 +372,3 @@ async def approve_transaction(request: Request, caseId: str = Form(...), token: 
         return HTMLResponse("Refund Approved and Released.")
     
     return HTMLResponse("Not authorized to approve this action.", status_code=403)
-
-@router.get("/dispute-confirm", response_class=HTMLResponse)
-async def dispute_transaction_confirm(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
-    case = db.query(Case).filter(Case.case_id == caseId).first()
-    if not case: return HTMLResponse("Case not found", status_code=404)
-    return templates.TemplateResponse("action_confirm.html", {
-        "request": request, "case": case, "action_title": "Dispute Transaction", "post_url": "/transactions/dispute", "token": token
-    })
-
-@router.post("/dispute", response_class=HTMLResponse)
-async def dispute_transaction(request: Request, caseId: str = Form(...), token: str = Form(...), db: Session = Depends(get_db)):
-    case = db.query(Case).filter(Case.case_id == caseId).first()
-    if not case: return HTMLResponse("Case not found", status_code=404)
-    is_seller, _, _ = validators.validate_party_token(case, "seller", token)
-    is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
-    if not is_buyer and not is_seller:
-        return HTMLResponse("Invalid token", status_code=403)
-        
-    if case.status not in [StatusEnum.EFFECTIVE, StatusEnum.SIGNED]:
-        return HTMLResponse(f"Cannot dispute. Case is currently in {case.status.value} status.", status_code=400)
-
-    case.status = StatusEnum.DISPUTED
-    case.dispute_time = datetime.now(timezone.utc)
-    case.payment_request_time = None
-    case.refund_request_time = None
-    db.commit()
-    return HTMLResponse("Transaction Disputed. Case is now in DISPUTED status.")
-

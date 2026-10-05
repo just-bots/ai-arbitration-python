@@ -134,39 +134,47 @@ async def post_evidence(
         "files_info": uploaded_files_info
     })
 
-@router.post("/escalate", response_class=HTMLResponse)
-async def escalate_to_adjudication(
+@router.get("/dispute-confirm", response_class=HTMLResponse)
+async def dispute_request_confirm(request: Request, caseId: str, token: str, db: Session = Depends(get_db)):
+    case = db.query(Case).filter(Case.case_id == caseId).first()
+    if not case: return HTMLResponse("Case not found", status_code=404)
+    return templates.TemplateResponse("action_confirm.html", {
+        "request": request, "case": case, "action_title": "Dispute Request", "post_url": "/prosecution/dispute", "token": token
+    })
+
+@router.post("/dispute", response_class=HTMLResponse)
+async def dispute_request(
     request: Request,
     caseId: str = Form(...),
     token: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    """Ends the Prosecution phase and moves case to DISPUTED status.
-
-    NOTE: This mirrors the n8n Prosecution workflow. Setting DISPUTED + dispute_time
-    here signals the Adjudication scheduler to pick this case up. The adjudication
-    workflow will then separately set PROCESSING + adjudication_time when it begins work.
-    """
+    """Ends the Prosecution phase and moves case to DISPUTED status."""
     case = db.query(Case).filter(Case.case_id == caseId).first()
     if not case:
         return HTMLResponse("Case not found", status_code=404)
 
-    if case.status != StatusEnum.EFFECTIVE:
-        return HTMLResponse(f"Cannot escalate. Case must be in EFFECTIVE status (funds deposited), currently in {case.status.value}.", status_code=400)
+    if case.status != StatusEnum.REQUESTED:
+        return HTMLResponse(f"Cannot dispute. Case must be in REQUESTED status, currently in {case.status.value}.", status_code=400)
 
     is_seller, _, _ = validators.validate_party_token(case, "seller", token)
     is_buyer, _, _ = validators.validate_party_token(case, "buyer", token)
     if not is_buyer and not is_seller:
         return HTMLResponse("Unauthorized token.", status_code=403)
 
-    # Matches n8n "Record Dispute1" node: Status=DISPUTED, Dispute Time=now
+    if case.payment_request_time and not is_buyer:
+        return HTMLResponse("Only the buyer can dispute a payment request.", status_code=403)
+    
+    if case.refund_request_time and not is_seller:
+        return HTMLResponse("Only the seller can dispute a refund request.", status_code=403)
+
     case.status = StatusEnum.DISPUTED
     case.dispute_time = datetime.now(timezone.utc)
     db.commit()
 
     return HTMLResponse(f"""
         <div style='font-family: sans-serif; text-align: center; margin-top: 50px;'>
-            <h1>Case Escalated to Dispute</h1>
+            <h1>Request Disputed</h1>
             <p>Case {caseId} is now <strong>DISPUTED</strong>. The AI Adjudication scheduler
             will pick this case up after the 7-day evidence window closes.</p>
         </div>
