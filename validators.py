@@ -4,6 +4,7 @@ validators.py — Centralized validation logic for wallet addresses and party to
 
 import re
 import secrets
+import hashlib
 from typing import Optional, Tuple
 from models import Case
 
@@ -84,3 +85,16 @@ def validate_file_upload(filename: Optional[str], file_size: Optional[int], mime
         return False, f"File type not allowed. Accepted types: {', '.join(ALLOWED_MIME_TYPES)}"
     
     return True, None
+
+def generate_hitl_token(seller_token: str, buyer_token: str) -> str:
+    """Generates a cryptographically secure HITL token using SHA-256."""
+    val = f"{seller_token}:{buyer_token}".encode('utf-8')
+    return hashlib.sha256(val).hexdigest()
+
+def validate_hitl_token(case: Case, token: str) -> Tuple[bool, Optional[str]]:
+    """Validates the HITL token against the expected combination for the case."""
+    expected_token = generate_hitl_token(case.seller_token, case.buyer_token)
+    if secrets.compare_digest(token, expected_token):
+        return True, None
+
+    return False, "Invalid HITL token"

@@ -94,13 +94,12 @@ async def submit_appeal(
     case.appeal_time = datetime.now(timezone.utc)
     db.commit()
 
-    # Use secure ADMIN_KEY for admin endpoints
-    from dependencies import ADMIN_KEY
-    admin_token = ADMIN_KEY
+    # Use combination of Seller and Buyer token for HITL endpoints
+    hitl_token = validators.generate_hitl_token(case.seller_token, case.buyer_token)
     
     # Notify admin that a review is required
     objecting_name = case.buyer if party == RoleEnum.BUYER else case.seller
-    review_url = f"{BASE_URL}/objection/review?caseId={caseId}&token={admin_token}"
+    review_url = f"{BASE_URL}/objection/review?caseId={caseId}&token={hitl_token}"
     if ADMIN_EMAIL:
         email_service.send_objection_received(
             case_id=caseId, objecting_party=objecting_name,
@@ -122,9 +121,9 @@ async def review_dashboard(request: Request, caseId: str, token: str, db: Sessio
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    from dependencies import ADMIN_KEY
-    if not secrets.compare_digest(token, ADMIN_KEY):
-        return HTMLResponse("Invalid admin key", status_code=403)
+    is_valid, error = validators.validate_hitl_token(case, token)
+    if not is_valid:
+        return HTMLResponse(error, status_code=403)
         
     # Get the latest appeal message
     appeal_msg = db.query(Message).filter(Message.case_id == caseId, Message.label == LabelEnum.APPEAL).order_by(Message.time.desc()).first()
@@ -143,9 +142,9 @@ async def process_review(request: Request, caseId: str = Form(...), action: str 
     if not case:
         return HTMLResponse("Case not found", status_code=404)
         
-    from dependencies import ADMIN_KEY
-    if not secrets.compare_digest(token, ADMIN_KEY):
-        return HTMLResponse("Invalid admin key", status_code=403)
+    is_valid, error = validators.validate_hitl_token(case, token)
+    if not is_valid:
+        return HTMLResponse(error, status_code=403)
         
     if action == "uphold":
         # Handle seller and buyer payouts independently for idempotency and atomicity
