@@ -4,6 +4,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import os
+import json
+import re
 
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -38,6 +40,21 @@ class FinalRuling(BaseModel):
     seller_award: str = Field(description="Amount awarded to the seller in Wei (string format)")
     rationale: str = Field(description="Detailed rationale for the final ruling")
     confidence: float = Field(description="AI Confidence score between 0.0 and 1.0")
+
+def parse_magistrate_report_from_text(text: str) -> MagistrateReport:
+    """Extracts and validates a MagistrateReport Pydantic object from raw markdown text."""
+    # 1. Look for ```json ... ``` or ``` ... ``` codeblock
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    json_str = match.group(1) if match else None
+
+    # 2. Fallback: match outermost curly braces { ... }
+    if not json_str:
+        match = re.search(r"(\{.*\})", text, re.DOTALL)
+        json_str = match.group(1) if match else text.strip()
+
+    # 3. Parse JSON and validate against MagistrateReport schema
+    data = json.loads(json_str)
+    return MagistrateReport.model_validate(data)
 
 router = APIRouter(prefix="/adjudication", tags=["Adjudication"])
 templates = Jinja2Templates(directory="templates")
@@ -245,7 +262,6 @@ def hybrid_search_legal_knowledge(
 
     return [dict(zip(columns, row)) for row in rows]
 
-
 @tool
 def search_legal_authorities(query: str, jurisdiction: str = "", top_k: int = 5) -> str:
     """Searches statutes, UCC provisions, commercial regulations, contract law rules, and legal precedents using Hybrid RRF (Vector + Keyword).
@@ -279,7 +295,6 @@ def search_legal_authorities(query: str, jurisdiction: str = "", top_k: int = 5)
         return "\n\n---\n\n".join(formatted)
     except Exception as e:
         return f"Legal search error: {e}"
-
 
 @tool
 def fetch_legal_authority(document_id: str) -> str:
@@ -375,10 +390,10 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
     ## Evidence Files: 
     {file_table}
 
-    ## Messages:
+    ## Messages: 
     {msg_log if msg_log else "_No messages submitted._"}
 
-    ## Contract Text:
+    ## Contract Text: 
     ```
     {case.contract_text or "No contract text provided."}
     ```
@@ -445,7 +460,22 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
              "- Use 'read_evidence_file' to examine uploaded evidence and 'external_verification' for URLs/tracking.\n"
              "- Use 'calculator' for exact damage award math.\n"
              "- Distinguish agreed facts, disputed facts, and unsupported claims.\n"
-             "- Provide a factual summary, cite governing legal authorities, and calculate the exact proposed Wei payouts (must sum to escrow_balance)."),
+             "- Provide a factual summary, cite governing legal authorities, and calculate the exact proposed Wei payouts (must sum to escrow_balance).\n\n"
+             "OUTPUT FORMAT REQUIREMENT:\n"
+             "When your investigation is complete, your final answer MUST be ONLY a single JSON code block matching this schema:\n"
+             "```json\n"
+             "{\n"
+             '  "summary": "string",\n'
+             '  "facts": ["string"],\n'
+             '  "contradictions": ["string"],\n'
+             '  "unsubstantiated_claims": ["string"],\n'
+             '  "applicable_legal_authorities": ["string"],\n'
+             '  "reasoning": "string",\n'
+             '  "recommended_buyer_payout": "Wei string",\n'
+             '  "recommended_seller_payout": "Wei string"\n'
+             "}\n"
+             "```\n"
+             "Do not include conversational preamble or explanation outside the JSON code block."),
             MessagesPlaceholder(variable_name="input"),
             ("placeholder", "{agent_scratchpad}")
         ])
@@ -461,11 +491,8 @@ async def run_adjudication(request: Request, caseId: str = Form(...), db: Sessio
         agent_executor = AgentExecutor(agent=agent, tools=magistrate_tools, verbose=True)
     
         raw_report = (await asyncio.to_thread(agent_executor.invoke, {"input": [HumanMessage(content=user_prompt)]}))["output"]
-        # Extract the structured JSON from the raw report text using the fast judge_llm
-        magistrate_report = await asyncio.to_thread(
-            judge_llm.with_structured_output(MagistrateReport).invoke,
-            f"Extract the magistrate report strictly matching the JSON schema from this text:\n\n{raw_report}"
-        )
+        # Parse structured JSON directly from agent output using pure Python
+        magistrate_report = parse_magistrate_report_from_text(raw_report)
     
         # Mathematical Validation of Magistrate Report
         try:
